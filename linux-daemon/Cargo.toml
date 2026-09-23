@@ -1,0 +1,37 @@
+[package]
+name = "zohara-linkd"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR GPL-3.0-or-later"
+description = "Zohara Link Linux-side companion daemon: pairs with the Zohara Link Android app over TLS/TCP and exposes a local Unix-socket IPC for desktop clients (Waybar, GTK settings panels, etc.)."
+authors = ["Zohara OS Team <https://github.com/Zohaib8090/zohara-link>"]
+
+[[bin]]
+name = "zohara-linkd"
+path = "src/main.rs"
+
+# Rust port of the old gtk_settings_app.py debug/status client.
+[[bin]]
+name = "zohara-link-status"
+path = "src/bin/status_client.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "time", "fs", "signal", "sync"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
+rustls-pemfile = "2"
+rcgen = { version = "0.13", default-features = false, features = ["pem", "ring"] }
+mdns-sd = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+rand = "0.8"
+
+[profile.release]
+opt-level = 3
+lto = true
+strip = true

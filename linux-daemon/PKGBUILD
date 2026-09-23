@@ -1,0 +1,38 @@
+# Maintainer: Zohara OS Team <https://github.com/Zohaib8090/zohara-link>
+pkgname=zohara-linkd
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Zohara Link Linux companion daemon (pairs with the Zohara Link Android app)"
+arch=('x86_64')
+url="https://github.com/Zohaib8090/zohara-link"
+license=('MIT' 'GPL-3.0-or-later')
+depends=('gcc-libs')
+makedepends=('cargo')
+optdepends=(
+  'wl-clipboard: clipboard sync on Wayland'
+  'xclip: clipboard sync on X11'
+  'ydotool: remote pointer control on Wayland'
+  'xdotool: remote pointer control on X11'
+  'playerctl: remote media control (MPRIS2)'
+  'libnotify: desktop notifications (notify-send)'
+  'hyprlock: proximity screen lock (Hyprland)'
+  'swaylock: proximity screen lock (sway)'
+)
+backup=()
+source=()
+sha256sums=()
+
+pkgver() {
+  grep '^version' "$startdir/Cargo.toml" | head -1 | cut -d'"' -f2
+}
+
+build() {
+  cd "$startdir"
+  cargo build --release --locked
+}
+
+package() {
+  install -Dm755 "$startdir/target/release/zohara-linkd" "$pkgdir/usr/bin/zohara-linkd"
+  install -Dm755 "$startdir/target/release/zohara-link-status" "$pkgdir/usr/bin/zohara-link-status"
+  install -Dm644 "$startdir/zohara-linkd.service" "$pkgdir/usr/lib/systemd/user/zohara-linkd.service"
+}

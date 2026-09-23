@@ -6,11 +6,14 @@ clipboard, file transfer, notification mirroring, and remote input.
 
 - `app/` — the Android app (Kotlin, Jetpack Compose), built with
   [AI Studio](https://ai.studio/apps/9cb9486d-d7a9-4e8a-9966-ce1ad3104b63).
-- `linux-daemon/` — `zohara-linkd`, the Python prototype of the Linux-side
-  daemon it pairs with. (A Rust rewrite, `zohara-connectd`, lives in the
-  main [zohara](https://github.com/Zohaib8090/zohara) repo and is currently
-  an unimplemented skeleton — this Python daemon is the only working
-  server side of the protocol today.)
+- `linux-daemon/` — `zohara-linkd`, the Rust daemon it pairs with (Tokio +
+  rustls + rcgen + mdns-sd; rewritten 2026-09-23 from an earlier Python
+  prototype — no Python involved anymore). Note there is a *second*,
+  separate `zohara-connectd` Rust crate in the main
+  [zohara](https://github.com/Zohaib8090/zohara) repo, which is still an
+  unimplemented skeleton; this repo's `zohara-linkd` is the one working
+  server side of the protocol today. Worth reconciling the two at some
+  point rather than maintaining both.
 
 Formerly "Zohara Connect" — renamed to avoid colliding with KDE Connect,
 which this replaces on Zohara OS, and to match the "Phone Link" language

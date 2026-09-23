@@ -4,10 +4,9 @@ After=network.target sound.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 %h/.config/zohara-link/daemon.py
+ExecStart=/usr/bin/zohara-linkd
 Restart=always
 RestartSec=3
-Environment=PYTHONUNBUFFERED=1
 StandardOutput=journal
 StandardError=journal
 
