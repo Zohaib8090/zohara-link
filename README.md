@@ -27,6 +27,13 @@ a security pass (2026-09-23: fixed a PIN-echo bypass and an
 any TLS certificate presented by the daemon — that needs certificate
 pinning before this should be used over an untrusted network.
 
+**A GUI for pairing/status is planned as a page inside `zohara-settings`**
+(Personalization → Ecosystem → Zohara Link), not a standalone app — see
+[zohara-settings/docs/UI-REDESIGN.md](https://github.com/Zohaib8090/zohara-settings/blob/main/docs/UI-REDESIGN.md)
+for the design language and current status. That page will be the first
+real client of this daemon's Unix socket IPC (below) beyond
+`zohara-link-status`.
+
 ## Run the Android app locally
 
 **Prerequisites:** [Android Studio](https://developer.android.com/studio)
