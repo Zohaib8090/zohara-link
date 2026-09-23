@@ -1,0 +1,8 @@
+{
+  "custom/zohara_battery": {
+    "format": " {}%",
+    "interval": 10,
+    "exec": "python3 -c \"import json, socket; s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.connect('/run/user/1000/zohara.sock'); s.send(b'{\\\"command\\\":\\\"GET_STATUS\\\"}\\n'); data = json.loads(s.recv(4096).decode()); tel = list(data.get('telemetry',{}).values()); print(tel[0].get('batteryLevel', '--') if tel else '--')\"",
+    "tooltip": "Zohara Link Phone Telemetry"
+  }
+}

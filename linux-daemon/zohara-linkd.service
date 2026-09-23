@@ -1,0 +1,15 @@
+[Unit]
+Description=Zohara Link Linux Companion Daemon (Android Ecosystem Sync)
+After=network.target sound.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 %h/.config/zohara-link/daemon.py
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

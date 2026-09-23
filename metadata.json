@@ -1,0 +1,6 @@
+{
+  "name": "Zohara Link",
+  "description": "Native Android & Arch Linux companion ecosystem featuring secure TLS pairing, mDNS discovery, shared clipboard, P2P chunk file transfers, notification mirroring with remote reply, telemetry sync, and D-Bus desktop integration.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
