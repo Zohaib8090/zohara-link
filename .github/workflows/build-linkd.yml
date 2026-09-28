@@ -126,6 +126,12 @@ jobs:
               }
             }" || echo "::warning::Dispatch failed; run publish.yml manually."
 
+      # No ISO-rebuild dispatch here: zohara-linkd isn't baked into the ISO
+      # image (it's Store-only, installed after the fact), so a fresh ISO
+      # build would rebuild the exact same image. See zohara-settings'
+      # workflow for the one that does need this (it's compiled from source
+      # straight into the image via the Docker build arg).
+
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
