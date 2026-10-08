@@ -21,13 +21,13 @@ Windows uses for the same kind of feature.
 
 ## Status
 
-Early prototype, not shipped on the ISO yet. The pairing protocol has had
-a security pass (2026-09-23: fixed a PIN-echo bypass and an
-`approved: true` bypass in the daemon) but the Android side still trusts
-any TLS certificate presented by the daemon — that needs certificate
-pinning before this should be used over an untrusted network.
+Early prototype, not shipped on the ISO yet (install it from Settings > Zohara Link once it is on your update channel).
+Since 2026-10-08 the connection is TLS with the phone **pinning the computer's certificate**, pairing is closed until you press
+"Pair a phone" in Settings, the PIN is typed on the phone (never sent over the network), and phones reconnect with a stored token.
+What is protected and what is not: [docs/SECURITY.md](docs/SECURITY.md). The daemon is tested end to end
+(`linux-daemon/tests/e2e.py`); the Android changes have **not been compiled or run on a phone yet**.
 
-**A GUI for pairing/status is planned as a page inside `zohara-settings`**
+**The pairing/status page lives inside `zohara-settings`**
 (Personalization → Ecosystem → Zohara Link), not a standalone app — see
 [zohara-settings/docs/UI-REDESIGN.md](https://github.com/Zohaib8090/zohara-settings/blob/main/docs/UI-REDESIGN.md)
 for the design language and current status. That page will be the first
