@@ -15,6 +15,9 @@ pub struct PairedDevice {
     pub paired_at: f64,
     pub client_cert_thumbprint: String,
     pub last_ip: String,
+    /// SHA-256 of the reconnect token handed to the phone at pairing (empty for devices paired before tokens existed).
+    #[serde(default)]
+    pub token_hash: String,
 }
 
 pub struct FileTransfer {

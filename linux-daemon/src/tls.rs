@@ -86,3 +86,14 @@ fn hostname_str() -> Option<String> {
 fn hostname_str() -> Option<String> {
     std::env::var("COMPUTERNAME").ok()
 }
+
+/// SHA-256 fingerprint (lowercase hex) of the first certificate in the PEM file: what the phone pins and what the pairing
+/// notification shows, so the person can see the phone is talking to this computer and not to someone in the middle.
+pub fn cert_fingerprint(cert_path: &Path) -> Result<String> {
+    let pem = std::fs::read(cert_path).context("read cert file")?;
+    let first = rustls_pemfile::certs(&mut pem.as_slice())
+        .next()
+        .context("no certificate in cert file")?
+        .context("parse certificate PEM")?;
+    Ok(crate::auth::fingerprint(first.as_ref()))
+}

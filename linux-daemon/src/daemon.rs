@@ -1,12 +1,12 @@
 use crate::protocol::{FileTransfer, PairedDevice};
-use crate::{desktop, mdns, tls};
+use crate::{auth, desktop, mdns, tls};
 use anyhow::{Context, Result};
 use rand::Rng;
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream, UnixListener, UnixStream};
 use tokio::sync::{broadcast, Mutex as TokioMutex};
@@ -22,9 +22,12 @@ pub struct Daemon {
     cert_path: PathBuf,
     key_path: PathBuf,
     unix_socket_path: PathBuf,
+    /// SHA-256 of this daemon's TLS certificate: what phones pin and what the pairing notification shows.
+    fingerprint: String,
 
     paired_devices: TokioMutex<HashMap<String, PairedDevice>>,
-    pending_pairings: TokioMutex<HashMap<String, String>>,
+    /// PIN waiting for each device id, with its tries and age (see `auth::PendingPin`).
+    pending_pairings: TokioMutex<HashMap<String, auth::PendingPin>>,
     /// Connections (keyed by the connection-scoped "dev_<ip>_<port>" id)
     /// that have completed PAIR_VERIFY *on this TCP connection*. Nothing
     /// else here acts on a packet without this -- see handle_packet's gate.
@@ -33,7 +36,8 @@ pub struct Daemon {
     /// needs real mTLS client-cert pinning, tracked separately), so a
     /// previously-paired device still has to redo the PIN handshake on
     /// every reconnect. Real UX cost, not a bug in this port.
-    authenticated_connections: TokioMutex<HashSet<String>>,
+    /// Connection id -> the paired device that proved itself on it (PIN just now, or its stored token).
+    authenticated_connections: TokioMutex<HashMap<String, String>>,
     /// Live TCP connections, so the desktop side (Unix IPC "SEND_CLIPBOARD",
     /// and the clipboard watcher loop) can push to paired phones. The
     /// Python daemon this replaced declared the equivalent dict but never
@@ -62,20 +66,29 @@ impl Daemon {
         let paired_devices = load_paired_devices(&paired_devices_file);
 
         let uid = unsafe { libc_geteuid() };
-        let unix_socket_path = PathBuf::from(format!("/run/user/{uid}/zohara.sock"));
+        // ZOHARA_LINK_SOCKET lets tests (and a second instance) use another path.
+        let unix_socket_path = std::env::var_os("ZOHARA_LINK_SOCKET")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(format!("/run/user/{uid}/zohara.sock")));
 
         let (ipc_broadcast, _) = broadcast::channel(64);
 
+        let cert_path = config_dir.join("daemon.crt");
+        let key_path = config_dir.join("daemon.key");
+        tls::ensure_self_signed_cert(&cert_path, &key_path)?;
+        let fingerprint = tls::cert_fingerprint(&cert_path)?;
+
         Ok(Arc::new(Self {
             port,
-            cert_path: config_dir.join("daemon.crt"),
-            key_path: config_dir.join("daemon.key"),
+            cert_path,
+            key_path,
+            fingerprint,
             paired_devices_file,
             downloads_dir,
             unix_socket_path,
             paired_devices: TokioMutex::new(paired_devices),
             pending_pairings: TokioMutex::new(HashMap::new()),
-            authenticated_connections: TokioMutex::new(HashSet::new()),
+            authenticated_connections: TokioMutex::new(HashMap::new()),
             active_connections: TokioMutex::new(HashMap::new()),
             device_telemetry: TokioMutex::new(HashMap::new()),
             active_file_transfers: TokioMutex::new(HashMap::new()),
@@ -85,7 +98,6 @@ impl Daemon {
     }
 
     pub async fn run(self: Arc<Self>) -> Result<()> {
-        tls::ensure_self_signed_cert(&self.cert_path, &self.key_path)?;
         let tls_config = tls::load_tls_config(&self.cert_path, &self.key_path)?;
         let acceptor = TlsAcceptor::from(Arc::new(tls_config));
 
@@ -202,11 +214,12 @@ impl Daemon {
         // write files under Downloads/ZoharaLink.
         if ptype != "PAIR_REQUEST"
             && ptype != "PAIR_VERIFY"
+            && ptype != "AUTH"
             && !self
                 .authenticated_connections
                 .lock()
                 .await
-                .contains(device_id)
+                .contains_key(device_id)
         {
             log::warn!("Rejected [{ptype}] from unauthenticated connection {device_id}");
             let _ = send_json(writer, &json!({"type": "ERROR", "error": "not paired on this connection"})).await;
@@ -216,6 +229,7 @@ impl Daemon {
         match ptype {
             "PAIR_REQUEST" => self.handle_pair_request(device_id, &packet, writer).await,
             "PAIR_VERIFY" => self.handle_pair_verify(device_id, &packet, writer).await,
+            "AUTH" => self.handle_auth(device_id, &packet, writer).await,
             "CLIPBOARD_SYNC" => self.handle_clipboard_sync(&packet).await,
             "TELEMETRY_STATUS" => self.handle_telemetry(device_id, packet).await,
             "NOTIFICATION_POST" => self.handle_notification_post(&packet).await,
@@ -249,7 +263,8 @@ impl Daemon {
         self.pending_pairings
             .lock()
             .await
-            .insert(req_device_id.clone(), pin.clone());
+            .insert(req_device_id.clone(), auth::PendingPin::new(pin.clone()));
+        let short_fp = auth::short_fingerprint(&self.fingerprint);
 
         log::info!("*** PAIRING AUTHORIZATION REQUIRED ***");
         log::info!("Device: {req_device_name} ({req_device_id})");
@@ -257,11 +272,13 @@ impl Daemon {
 
         desktop::send_desktop_notification(
             "Zohara Link - Pairing Request",
-            &format!("Device '{req_device_name}' wants to pair.\nSAS Verification PIN: {pin}"),
+            &format!(
+                "Device '{req_device_name}' wants to pair.\nPIN: {pin}\nThe phone must show this code: {short_fp}"
+            ),
         );
         self.broadcast_local_ipc(
             "PAIR_REQUEST",
-            json!({"deviceId": req_device_id, "deviceName": req_device_name, "pin": pin}),
+            json!({"deviceId": req_device_id, "deviceName": req_device_name, "pin": pin, "fingerprint": short_fp}),
         )
         .await;
 
@@ -277,6 +294,7 @@ impl Daemon {
             "type": "PAIR_CHALLENGE",
             "serverName": hostname(),
             "timestamp": unix_time(),
+            "certFingerprint": self.fingerprint,
         });
         let _ = send_json(writer, &challenge).await;
     }
@@ -294,14 +312,26 @@ impl Daemon {
             .unwrap_or("Android Device")
             .to_string();
 
-        let expected_pin = self.pending_pairings.lock().await.get(&req_device_id).cloned();
-
         // No `approved == true` bypass: that field is the client's own
         // unverified claim about itself, not something the desktop user
         // approved, and accepting it would skip the PIN check entirely.
-        let matched = matches!((&expected_pin, user_pin), (Some(exp), Some(p)) if exp == p);
+        // A PIN survives three wrong tries or two minutes, whichever comes first.
+        let outcome = {
+            let mut pending = self.pending_pairings.lock().await;
+            let outcome = match pending.get_mut(&req_device_id) {
+                Some(p) => p.check(user_pin, Instant::now()),
+                None => auth::PinCheck::Expired,
+            };
+            if outcome != auth::PinCheck::Wrong {
+                // Matched (single use) or dead: either way the PIN is gone.
+                pending.remove(&req_device_id);
+            }
+            outcome
+        };
+        let matched = outcome == auth::PinCheck::Match;
 
         if matched {
+            let token = auth::new_token();
             let last_ip = device_id
                 .strip_prefix("dev_")
                 .and_then(|s| s.rsplit_once('_'))
@@ -317,32 +347,67 @@ impl Daemon {
                     .unwrap_or("trusted")
                     .to_string(),
                 last_ip,
+                token_hash: auth::token_hash(&token),
             };
             self.paired_devices
                 .lock()
                 .await
                 .insert(req_device_id.clone(), paired.clone());
             self.save_paired_devices().await;
-            self.pending_pairings.lock().await.remove(&req_device_id);
             self.authenticated_connections
                 .lock()
                 .await
-                .insert(device_id.to_string());
+                .insert(device_id.to_string(), req_device_id.clone());
 
             log::info!("Device '{req_device_name}' paired successfully!");
             let _ = send_json(
                 writer,
-                &json!({"type": "PAIR_CONFIRMED", "status": "SUCCESS", "serverName": hostname()}),
+                &json!({
+                    "type": "PAIR_CONFIRMED",
+                    "status": "SUCCESS",
+                    "serverName": hostname(),
+                    "sessionToken": token,
+                    "certFingerprint": self.fingerprint,
+                }),
             )
             .await;
-            self.broadcast_local_ipc("DEVICE_PAIRED", serde_json::to_value(&paired).unwrap())
-                .await;
+            self.broadcast_local_ipc("DEVICE_PAIRED", public_device(&paired)).await;
         } else {
-            let _ = send_json(
-                writer,
-                &json!({"type": "PAIR_CONFIRMED", "status": "FAILED", "error": "PIN mismatch"}),
-            )
-            .await;
+            let error = if outcome == auth::PinCheck::Expired {
+                "PIN expired, ask for a new one"
+            } else {
+                "PIN mismatch"
+            };
+            self.broadcast_local_ipc("PAIR_FAILED", json!({"deviceId": req_device_id, "error": error})).await;
+            let _ = send_json(writer, &json!({"type": "PAIR_CONFIRMED", "status": "FAILED", "error": error})).await;
+        }
+    }
+
+    /// A phone that paired before proves itself with the token it was given, instead of redoing the PIN on every connection.
+    async fn handle_auth(&self, device_id: &str, packet: &Value, writer: &SharedWriter) {
+        let req_device_id = packet.get("deviceId").and_then(Value::as_str).unwrap_or("");
+        let token = packet.get("token").and_then(Value::as_str).unwrap_or("");
+        let ok = match self.paired_devices.lock().await.get_mut(req_device_id) {
+            Some(d) if auth::token_matches(&d.token_hash, token) => {
+                d.last_ip = device_id
+                    .strip_prefix("dev_")
+                    .and_then(|s| s.rsplit_once('_'))
+                    .map(|(ip, _)| ip.to_string())
+                    .unwrap_or_default();
+                true
+            }
+            _ => false,
+        };
+        if ok {
+            self.authenticated_connections.lock().await.insert(device_id.to_string(), req_device_id.to_string());
+            self.save_paired_devices().await;
+            self.broadcast_local_ipc("DEVICE_CONNECTED", json!({"deviceId": req_device_id})).await;
+            let _ = send_json(writer, &json!({"type": "AUTH_RESULT", "status": "SUCCESS", "serverName": hostname()})).await;
+        } else {
+            log::warn!("AUTH refused for device '{req_device_id}' on {device_id}");
+            // A short pause makes guessing a token from the network pointless.
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            let _ = send_json(writer, &json!({"type": "AUTH_RESULT", "status": "FAILED", "error": "not paired or token wrong"})).await;
         }
     }
 
@@ -495,10 +560,31 @@ impl Daemon {
     async fn handle_ipc_command(&self, req: &Value) -> Value {
         match req.get("command").and_then(Value::as_str) {
             Some("GET_STATUS") => {
-                let paired: Vec<_> = self.paired_devices.lock().await.values().cloned().collect();
+                let paired: Vec<Value> = self.paired_devices.lock().await.values().map(public_device).collect();
+                let connected: Vec<String> = self.authenticated_connections.lock().await.values().cloned().collect();
                 let telemetry = self.device_telemetry.lock().await.clone();
                 let active: Vec<_> = self.active_file_transfers.lock().await.keys().cloned().collect();
-                json!({"paired_devices": paired, "telemetry": telemetry, "active_transfers": active})
+                json!({"paired_devices": paired, "connected_device_ids": connected, "telemetry": telemetry, "active_transfers": active})
+            }
+            Some("GET_IDENTITY") => {
+                json!({
+                    "name": hostname(),
+                    "port": self.port,
+                    "fingerprint": self.fingerprint,
+                    "fingerprint_short": auth::short_fingerprint(&self.fingerprint),
+                    "downloads_dir": self.downloads_dir.display().to_string(),
+                })
+            }
+            Some("UNPAIR") => {
+                let id = req.get("deviceId").and_then(Value::as_str).unwrap_or("");
+                let removed = self.paired_devices.lock().await.remove(id).is_some();
+                if removed {
+                    self.save_paired_devices().await;
+                    // Whatever is connected as that device loses access at once.
+                    self.authenticated_connections.lock().await.retain(|_, dev| dev != id);
+                    self.broadcast_local_ipc("DEVICE_UNPAIRED", json!({"deviceId": id})).await;
+                }
+                json!({"status": if removed { "OK" } else { "NOT_FOUND" }})
             }
             Some("SEND_CLIPBOARD") => {
                 let text = req.get("text").and_then(Value::as_str).unwrap_or("");
@@ -566,6 +652,15 @@ impl Daemon {
             Err(e) => log::error!("Error serializing paired devices: {e}"),
         }
     }
+}
+
+/// A paired device as local clients may see it: never the token hash.
+fn public_device(d: &PairedDevice) -> Value {
+    let mut v = serde_json::to_value(d).unwrap_or_default();
+    if let Some(o) = v.as_object_mut() {
+        o.remove("token_hash");
+    }
+    v
 }
 
 fn handle_input_event(packet: &Value) {

@@ -10,6 +10,7 @@
 //! individual module doc comments for what changed in the port versus a
 //! literal translation.
 
+mod auth;
 mod daemon;
 mod desktop;
 mod mdns;
