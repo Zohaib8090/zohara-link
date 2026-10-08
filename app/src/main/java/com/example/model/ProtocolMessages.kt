@@ -11,6 +11,8 @@ object ProtocolTypes {
     const val PAIR_CHALLENGE = "PAIR_CHALLENGE"
     const val PAIR_VERIFY = "PAIR_VERIFY"
     const val PAIR_CONFIRMED = "PAIR_CONFIRMED"
+    const val AUTH = "AUTH"
+    const val AUTH_RESULT = "AUTH_RESULT"
     const val CLIPBOARD_SYNC = "CLIPBOARD_SYNC"
     const val FILE_OFFER = "FILE_OFFER"
     const val FILE_ACCEPT = "FILE_ACCEPT"

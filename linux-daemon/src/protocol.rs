@@ -18,6 +18,9 @@ pub struct PairedDevice {
     /// SHA-256 of the reconnect token handed to the phone at pairing (empty for devices paired before tokens existed).
     #[serde(default)]
     pub token_hash: String,
+    /// May this phone move the mouse and click? Off until the person allows it for that phone (Settings > Zohara Link).
+    #[serde(default)]
+    pub allow_input: bool,
 }
 
 pub struct FileTransfer {

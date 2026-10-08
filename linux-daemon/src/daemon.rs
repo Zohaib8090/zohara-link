@@ -1,5 +1,5 @@
 use crate::protocol::{FileTransfer, PairedDevice};
-use crate::{auth, desktop, mdns, tls};
+use crate::{auth, desktop, limits, mdns, tls};
 use anyhow::{Context, Result};
 use rand::Rng;
 use serde_json::{json, Value};
@@ -22,6 +22,9 @@ pub struct Daemon {
     cert_path: PathBuf,
     key_path: PathBuf,
     unix_socket_path: PathBuf,
+    /// Phones may only start pairing while this is in the future. Closed by default: the person opens it from Settings
+    /// ("Pair a phone"), so a stranger on the Wi-Fi cannot make PIN pop-ups appear on their own.
+    pairing_open_until: TokioMutex<Option<Instant>>,
     /// SHA-256 of this daemon's TLS certificate: what phones pin and what the pairing notification shows.
     fingerprint: String,
 
@@ -61,6 +64,8 @@ impl Daemon {
         let downloads_dir = PathBuf::from(&home).join("Downloads/ZoharaLink");
         std::fs::create_dir_all(&config_dir).context("create config dir")?;
         std::fs::create_dir_all(&downloads_dir).context("create downloads dir")?;
+        // The folder holds the private key and the list of paired phones: only this user.
+        restrict_to_owner(&config_dir, 0o700);
 
         let paired_devices_file = config_dir.join("paired_devices.json");
         let paired_devices = load_paired_devices(&paired_devices_file);
@@ -83,6 +88,7 @@ impl Daemon {
             cert_path,
             key_path,
             fingerprint,
+            pairing_open_until: TokioMutex::new(None),
             paired_devices_file,
             downloads_dir,
             unix_socket_path,
@@ -114,6 +120,7 @@ impl Daemon {
         }
         let unix_listener = UnixListener::bind(&self.unix_socket_path)
             .with_context(|| format!("bind {}", self.unix_socket_path.display()))?;
+        restrict_to_owner(&self.unix_socket_path, 0o600);
         log::info!(
             "Local IPC Unix domain socket active at {}",
             self.unix_socket_path.display()
@@ -162,6 +169,15 @@ impl Daemon {
         log::info!("Incoming connection from {peer}");
         let device_id = format!("dev_{}_{}", peer.ip(), peer.port());
 
+        {
+            let open = self.active_connections.lock().await.len();
+            let authed = self.authenticated_connections.lock().await.len();
+            if open >= limits::MAX_CONNECTIONS || open.saturating_sub(authed) >= limits::MAX_UNAUTHENTICATED {
+                log::warn!("Too many open connections; refusing {peer}");
+                return;
+            }
+        }
+
         let tls_stream = match acceptor.accept(stream).await {
             Ok(s) => s,
             Err(e) => {
@@ -177,9 +193,24 @@ impl Daemon {
             .await
             .insert(device_id.clone(), write_half.clone());
 
-        let mut lines = BufReader::new(read_half).lines();
+        let mut reader = BufReader::new(read_half);
+        let deadline = Instant::now() + std::time::Duration::from_secs(limits::AUTH_DEADLINE_SECS);
         loop {
-            match lines.next_line().await {
+            // A connection that has not paired or shown its token in time is dropped; paired ones stay as long as they like.
+            let authed = self.authenticated_connections.lock().await.contains_key(&device_id);
+            let next = if authed {
+                limits::read_line_bounded(&mut reader, limits::MAX_LINE).await
+            } else {
+                let left = deadline.saturating_duration_since(Instant::now());
+                match tokio::time::timeout(left, limits::read_line_bounded(&mut reader, limits::MAX_LINE)).await {
+                    Ok(r) => r,
+                    Err(_) => {
+                        log::warn!("{peer} did not pair or authenticate in time; closing");
+                        break;
+                    }
+                }
+            };
+            match next {
                 Ok(Some(line)) => {
                     let line = line.trim();
                     if line.is_empty() {
@@ -236,7 +267,16 @@ impl Daemon {
             "FILE_OFFER" => self.handle_file_offer(&packet, writer).await,
             "FILE_CHUNK" => self.handle_file_chunk(&packet).await,
             "FILE_COMPLETE" => self.handle_file_complete(&packet).await,
-            "INPUT_EVENT" => handle_input_event(&packet),
+            "INPUT_EVENT" => {
+                // Controlling the mouse is the most dangerous thing a phone can do here: it needs its own permission.
+                let dev = self.authenticated_connections.lock().await.get(device_id).cloned().unwrap_or_default();
+                let allowed = self.paired_devices.lock().await.get(&dev).map(|d| d.allow_input).unwrap_or(false);
+                if allowed {
+                    handle_input_event(&packet);
+                } else {
+                    let _ = send_json(writer, &json!({"type": "ERROR", "error": "remote input is not allowed for this phone"})).await;
+                }
+            }
             "MEDIA_CONTROL" => {
                 let action = packet.get("action").and_then(Value::as_str).unwrap_or("");
                 desktop::control_mpris2_media(action);
@@ -247,16 +287,26 @@ impl Daemon {
     }
 
     async fn handle_pair_request(&self, device_id: &str, packet: &Value, writer: &SharedWriter) {
+        let open = matches!(*self.pairing_open_until.lock().await, Some(t) if t > Instant::now());
+        if !open {
+            log::warn!("Pairing request from {device_id} refused: pairing is not open");
+            let _ = send_json(
+                writer,
+                &json!({"type": "PAIR_CONFIRMED", "status": "FAILED",
+                        "error": "Pairing is off on the computer. Open Settings > Zohara Link there and press Pair a phone."}),
+            )
+            .await;
+            return;
+        }
         let req_device_id = packet
             .get("deviceId")
             .and_then(Value::as_str)
             .unwrap_or(device_id)
             .to_string();
-        let req_device_name = packet
-            .get("deviceName")
-            .and_then(Value::as_str)
-            .unwrap_or("Android Device")
-            .to_string();
+        let req_device_name = limits::clean_text(
+            packet.get("deviceName").and_then(Value::as_str).unwrap_or("Android Device"),
+            60,
+        );
         let pin: u32 = rand::thread_rng().gen_range(100_000..=999_999);
         let pin = pin.to_string();
 
@@ -306,11 +356,10 @@ impl Daemon {
             .unwrap_or("")
             .to_string();
         let user_pin = packet.get("pinSas").and_then(Value::as_str);
-        let req_device_name = packet
-            .get("deviceName")
-            .and_then(Value::as_str)
-            .unwrap_or("Android Device")
-            .to_string();
+        let req_device_name = limits::clean_text(
+            packet.get("deviceName").and_then(Value::as_str).unwrap_or("Android Device"),
+            60,
+        );
 
         // No `approved == true` bypass: that field is the client's own
         // unverified claim about itself, not something the desktop user
@@ -348,12 +397,14 @@ impl Daemon {
                     .to_string(),
                 last_ip,
                 token_hash: auth::token_hash(&token),
+                allow_input: false,
             };
             self.paired_devices
                 .lock()
                 .await
                 .insert(req_device_id.clone(), paired.clone());
             self.save_paired_devices().await;
+            *self.pairing_open_until.lock().await = None; // one phone per press of "Pair a phone"
             self.authenticated_connections
                 .lock()
                 .await
@@ -438,10 +489,10 @@ impl Daemon {
     }
 
     async fn handle_notification_post(&self, packet: &Value) {
-        let title = packet.get("title").and_then(Value::as_str).unwrap_or("Android Notification");
-        let text = packet.get("text").and_then(Value::as_str).unwrap_or("");
-        let app_name = packet.get("appName").and_then(Value::as_str).unwrap_or("Phone");
-        desktop::send_desktop_notification(&format!("[{app_name}] {title}"), text);
+        let title = limits::clean_text(packet.get("title").and_then(Value::as_str).unwrap_or("Android Notification"), 120);
+        let text = limits::clean_text(packet.get("text").and_then(Value::as_str).unwrap_or(""), 500);
+        let app_name = limits::clean_text(packet.get("appName").and_then(Value::as_str).unwrap_or("Phone"), 40);
+        desktop::send_desktop_notification(&format!("[{app_name}] {title}"), &text);
         self.broadcast_local_ipc("NOTIFICATION_POSTED", packet.clone()).await;
     }
 
@@ -452,9 +503,22 @@ impl Daemon {
 
         let safe_name = std::path::Path::new(&file_name)
             .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
+            .map(|n| limits::clean_text(&n.to_string_lossy(), 200))
+            .filter(|n| !n.is_empty() && n != "." && n != "..")
             .unwrap_or_else(|| "received_file".to_string());
-        let dest_path = self.downloads_dir.join(&safe_name);
+
+        // Refuse before creating anything: too big, or too many transfers already running.
+        let refuse = |why: &'static str| json!({"type": "FILE_ACCEPT", "transferId": transfer_id, "accepted": false, "error": why});
+        if file_size > limits::MAX_FILE_BYTES {
+            let _ = send_json(writer, &refuse("file too large")).await;
+            return;
+        }
+        if self.active_file_transfers.lock().await.len() >= limits::MAX_TRANSFERS {
+            let _ = send_json(writer, &refuse("too many transfers at once")).await;
+            return;
+        }
+        // Never replace a file that is already there.
+        let dest_path = limits::unique_path(&self.downloads_dir, &safe_name);
 
         let handle = match tokio::fs::File::create(&dest_path).await {
             Ok(f) => f,
@@ -488,6 +552,14 @@ impl Daemon {
 
         let mut transfers = self.active_file_transfers.lock().await;
         let Some(info) = transfers.get_mut(transfer_id) else { return };
+        if info.received_bytes + data.len() as u64 > info.file_size {
+            // More than the phone said it would send: stop and delete the partial file.
+            log::warn!("transfer {transfer_id} sent more than its declared size; cancelled");
+            let path = info.dest_path.clone();
+            transfers.remove(transfer_id);
+            let _ = std::fs::remove_file(path);
+            return;
+        }
         if info.handle.write_all(&data).await.is_err() {
             log::warn!("write failed for transfer {transfer_id}");
             return;
@@ -564,7 +636,8 @@ impl Daemon {
                 let connected: Vec<String> = self.authenticated_connections.lock().await.values().cloned().collect();
                 let telemetry = self.device_telemetry.lock().await.clone();
                 let active: Vec<_> = self.active_file_transfers.lock().await.keys().cloned().collect();
-                json!({"paired_devices": paired, "connected_device_ids": connected, "telemetry": telemetry, "active_transfers": active})
+                let pairing_open = matches!(*self.pairing_open_until.lock().await, Some(t) if t > Instant::now());
+                json!({"paired_devices": paired, "connected_device_ids": connected, "pairing_open": pairing_open, "telemetry": telemetry, "active_transfers": active})
             }
             Some("GET_IDENTITY") => {
                 json!({
@@ -574,6 +647,37 @@ impl Daemon {
                     "fingerprint_short": auth::short_fingerprint(&self.fingerprint),
                     "downloads_dir": self.downloads_dir.display().to_string(),
                 })
+            }
+            Some("OPEN_PAIRING") => {
+                let secs = req.get("seconds").and_then(Value::as_u64).unwrap_or(300).clamp(30, 600);
+                *self.pairing_open_until.lock().await = Some(Instant::now() + std::time::Duration::from_secs(secs));
+                self.broadcast_local_ipc("PAIRING_OPEN", json!({"seconds": secs})).await;
+                json!({"status": "OK", "seconds": secs})
+            }
+            Some("CLOSE_PAIRING") => {
+                *self.pairing_open_until.lock().await = None;
+                self.broadcast_local_ipc("PAIRING_CLOSED", json!({})).await;
+                json!({"status": "OK"})
+            }
+            Some("SET_PERMISSION") => {
+                let id = req.get("deviceId").and_then(Value::as_str).unwrap_or("");
+                let input = req.get("input").and_then(Value::as_bool);
+                let found = {
+                    let mut devices = self.paired_devices.lock().await;
+                    match (devices.get_mut(id), input) {
+                        (Some(d), Some(v)) => {
+                            d.allow_input = v;
+                            true
+                        }
+                        _ => false,
+                    }
+                };
+                if found {
+                    self.save_paired_devices().await;
+                    json!({"status": "OK"})
+                } else {
+                    json!({"status": "NOT_FOUND"})
+                }
             }
             Some("UNPAIR") => {
                 let id = req.get("deviceId").and_then(Value::as_str).unwrap_or("");
@@ -648,6 +752,7 @@ impl Daemon {
                 if let Err(e) = std::fs::write(&self.paired_devices_file, json) {
                     log::error!("Error saving paired devices: {e}");
                 }
+                restrict_to_owner(&self.paired_devices_file, 0o600);
             }
             Err(e) => log::error!("Error serializing paired devices: {e}"),
         }
@@ -661,6 +766,14 @@ fn public_device(d: &PairedDevice) -> Value {
         o.remove("token_hash");
     }
     v
+}
+
+/// Gives a file or folder to its owner alone (the private key, the paired-phones list, the IPC socket).
+fn restrict_to_owner(path: &std::path::Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Err(e) = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)) {
+        log::warn!("could not restrict {}: {e}", path.display());
+    }
 }
 
 fn handle_input_event(packet: &Value) {

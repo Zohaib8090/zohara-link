@@ -12,6 +12,7 @@
 
 mod auth;
 mod daemon;
+mod limits;
 mod desktop;
 mod mdns;
 mod protocol;

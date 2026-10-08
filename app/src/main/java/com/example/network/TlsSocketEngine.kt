@@ -30,7 +30,9 @@ import java.io.OutputStream
 import java.io.PrintWriter
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.security.MessageDigest
 import java.security.SecureRandom
+import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import java.util.UUID
 import javax.net.ssl.SSLContext
@@ -42,7 +44,7 @@ import javax.net.ssl.X509TrustManager
 sealed class ConnectionState {
     object Disconnected : ConnectionState()
     object Connecting : ConnectionState()
-    data class PairingRequired(val pinSas: String, val host: String) : ConnectionState()
+    data class PairingRequired(val fingerprint: String, val host: String) : ConnectionState()
     data class Connected(val host: String, val port: Int, val serverName: String) : ConnectionState()
     data class Error(val message: String) : ConnectionState()
 }
@@ -70,6 +72,14 @@ class TlsSocketEngine(private val context: Context) {
     private var writer: PrintWriter? = null
     private var connectionJob: Job? = null
     private var heartbeatJob: Job? = null
+
+    // Certificate pinning. The computer's TLS certificate is self-signed, so instead of trusting any certificate (as this
+    // app used to) we remember the SHA-256 fingerprint of the one we paired with, together with the reconnect token that
+    // computer gave us, and refuse every other certificate on later connections. While pairing, the fingerprint is shown
+    // next to the PIN so the person can check it matches the one on the computer's screen.
+    private val pinPrefs by lazy { context.getSharedPreferences("zohara_link_pins", Context.MODE_PRIVATE) }
+    @Volatile private var observedFingerprint: String = ""
+    @Volatile private var requirePin = false
 
     private var currentHost: String = ""
     private var currentPort: Int = 42424
@@ -101,7 +111,9 @@ class TlsSocketEngine(private val context: Context) {
 
             try {
                 Log.d(TAG, "Attempting TLS connection to $host:$port...")
-                val sslContext = createUnsafeSslContext()
+                requirePin = isAlreadyPaired
+                observedFingerprint = ""
+                val sslContext = createPinningSslContext()
                 val sslFactory: SSLSocketFactory = sslContext.socketFactory
 
                 val rawSocket = Socket()
@@ -122,8 +134,18 @@ class TlsSocketEngine(private val context: Context) {
                 Log.d(TAG, "TLS Socket handshake completed with $host:$port")
 
                 if (isAlreadyPaired) {
-                    _connectionState.value = ConnectionState.Connected(host, port, host)
-                    startHeartbeat()
+                    // The handshake only succeeded because the certificate is a pinned one; prove who we are with its token.
+                    val token = pinPrefs.getString(observedFingerprint, null)
+                    if (token.isNullOrEmpty()) {
+                        disconnect()
+                        _connectionState.value = ConnectionState.Error("Pair with this computer again")
+                        return@launch
+                    }
+                    sendJson(JSONObject().apply {
+                        put("type", ProtocolTypes.AUTH)
+                        put("deviceId", deviceId)
+                        put("token", token)
+                    })
                 } else {
                     // Send pairing request
                     sendPairRequest()
@@ -172,8 +194,7 @@ class TlsSocketEngine(private val context: Context) {
                 put("deviceId", deviceId)
                 put("deviceName", "${Build.MANUFACTURER} ${Build.MODEL}")
                 put("pinSas", pin)
-                put("approved", true)
-            }
+                }
             sendJson(verify)
         }
     }
@@ -203,18 +224,44 @@ class TlsSocketEngine(private val context: Context) {
     private fun handleIncomingPacket(json: JSONObject) {
         when (json.optString("type")) {
             ProtocolTypes.PAIR_CHALLENGE -> {
-                val pin = json.optString("pinSas", "123456")
                 val serverName = json.optString("serverName", currentHost)
-                _connectionState.value = ConnectionState.PairingRequired(pin, serverName)
+                // The certificate the computer says it has must be the one this connection actually presented; if not,
+                // someone in the middle is relaying the pairing.
+                val claimed = json.optString("certFingerprint")
+                if (claimed.isEmpty() || claimed != observedFingerprint) {
+                    disconnect()
+                    _connectionState.value = ConnectionState.Error(
+                        "The computer's certificate does not match. Update Zohara Link on the computer, or do not pair on this network."
+                    )
+                    return
+                }
+                _connectionState.value = ConnectionState.PairingRequired(shortFingerprint(observedFingerprint), serverName)
+            }
+            ProtocolTypes.AUTH_RESULT -> {
+                if (json.optString("status") == "SUCCESS") {
+                    val serverName = json.optString("serverName", currentHost)
+                    _connectionState.value = ConnectionState.Connected(currentHost, currentPort, serverName)
+                    startHeartbeat()
+                } else {
+                    // The computer has forgotten this phone (it was unpaired there): the old pin is useless now.
+                    pinPrefs.edit().remove(observedFingerprint).apply()
+                    disconnect()
+                    _connectionState.value = ConnectionState.Error("This computer no longer knows this phone. Pair again.")
+                }
             }
             ProtocolTypes.PAIR_CONFIRMED -> {
                 val status = json.optString("status")
                 val serverName = json.optString("serverName", currentHost)
                 if (status == "SUCCESS") {
+                    val token = json.optString("sessionToken")
+                    if (token.isNotEmpty() && observedFingerprint.isNotEmpty()) {
+                        pinPrefs.edit().putString(observedFingerprint, token).apply()
+                    }
                     _connectionState.value = ConnectionState.Connected(currentHost, currentPort, serverName)
                     startHeartbeat()
                 } else {
-                    _connectionState.value = ConnectionState.Error("Pairing rejected by host")
+                    val why = json.optString("error", "Pairing rejected by host")
+                    _connectionState.value = ConnectionState.Error(why)
                 }
             }
             ProtocolTypes.CLIPBOARD_SYNC -> {
@@ -411,19 +458,32 @@ class TlsSocketEngine(private val context: Context) {
         _connectionState.value = ConnectionState.Disconnected
     }
 
-    private fun createUnsafeSslContext(): SSLContext {
-        val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
+    private fun createPinningSslContext(): SSLContext {
+        val pinning = arrayOf<TrustManager>(object : X509TrustManager {
             override fun checkClientTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
-            override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {}
+            override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: String?) {
+                val leaf = chain?.firstOrNull() ?: throw CertificateException("The computer sent no certificate")
+                val fp = sha256Hex(leaf.encoded)
+                observedFingerprint = fp
+                if (requirePin && !pinPrefs.contains(fp)) {
+                    throw CertificateException("This is not the computer you paired with (its certificate changed)")
+                }
+            }
             override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
         })
 
         val sslContext = SSLContext.getInstance("TLS")
-        sslContext.init(null, trustAllCerts, SecureRandom())
+        sslContext.init(null, pinning, SecureRandom())
         return sslContext
     }
 
     companion object {
         private const val TAG = "TlsSocketEngine"
+
+        fun sha256Hex(bytes: ByteArray): String =
+            MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+
+        /** First 16 hex digits in groups of four: the same short form the computer shows in its pairing notification. */
+        fun shortFingerprint(full: String): String = full.take(16).chunked(4).joinToString(" ")
     }
 }

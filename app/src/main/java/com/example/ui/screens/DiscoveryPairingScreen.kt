@@ -130,7 +130,7 @@ fun DiscoveryPairingScreen(
     if (connectionState is ConnectionState.PairingRequired) {
         val pairing = connectionState as ConnectionState.PairingRequired
         SasPairingDialog(
-            pinSas = pairing.pinSas,
+            fingerprint = pairing.fingerprint,
             hostName = pairing.host,
             onConfirm = { pin -> viewModel.confirmPairing(pin) },
             onDismiss = { viewModel.disconnect() }

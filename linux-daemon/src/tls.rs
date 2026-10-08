@@ -16,6 +16,9 @@ use std::path::Path;
 /// daemon restarts and upgrades.
 pub fn ensure_self_signed_cert(cert_path: &Path, key_path: &Path) -> Result<()> {
     if cert_path.exists() && key_path.exists() {
+        use std::os::unix::fs::PermissionsExt;
+        // Keys made by older versions were readable by other users on this computer.
+        let _ = std::fs::set_permissions(key_path, std::fs::Permissions::from_mode(0o600));
         return Ok(());
     }
     log::info!("Generating self-signed TLS certificate for Zohara Link daemon...");
@@ -41,7 +44,19 @@ pub fn ensure_self_signed_cert(cert_path: &Path, key_path: &Path) -> Result<()> 
         .context("self-sign certificate")?;
 
     std::fs::write(cert_path, cert.pem()).context("write cert file")?;
-    std::fs::write(key_path, key_pair.serialize_pem()).context("write key file")?;
+    // The private key never exists with loose permissions, not even for a moment.
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(key_path)
+            .context("create key file")?;
+        f.write_all(key_pair.serialize_pem().as_bytes()).context("write key file")?;
+    }
     log::info!(
         "Certificate written to {} / {}",
         cert_path.display(),

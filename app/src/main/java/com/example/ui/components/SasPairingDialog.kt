@@ -20,8 +20,15 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -41,13 +48,19 @@ import com.example.ui.theme.BentoSoftBlue
 import com.example.ui.theme.BentoTextBody
 import com.example.ui.theme.BentoTextMuted
 
+/**
+ * Pairing: the computer shows a 6-digit PIN in a notification (it is never sent to the phone, so nobody on the network
+ * can read it), and the person types it here. The fingerprint below must match the code in that same notification: it
+ * proves this phone is talking to that computer and not to something relaying the connection.
+ */
 @Composable
 fun SasPairingDialog(
-    pinSas: String,
+    fingerprint: String,
     hostName: String,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var pin by remember { mutableStateOf("") }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -77,7 +90,7 @@ fun SasPairingDialog(
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = "Verify that the 6-digit Short Authentication String (SAS) below matches the prompt displayed on your Arch Linux host ($hostName):",
+                    text = "Type the 6-digit PIN shown on $hostName, and check that the code below is the same one it shows:",
                     style = MaterialTheme.typography.bodyMedium,
                     color = BentoTextMuted,
                     textAlign = TextAlign.Center
@@ -95,8 +108,8 @@ fun SasPairingDialog(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = pinSas.chunked(3).joinToString(" - "),
-                        fontSize = 30.sp,
+                        text = fingerprint,
+                        fontSize = 24.sp,
                         fontWeight = FontWeight.ExtraBold,
                         fontFamily = FontFamily.Monospace,
                         color = BentoPrimaryBlue,
@@ -105,16 +118,20 @@ fun SasPairingDialog(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "🔒 Encrypted TLS Socket Handshake with RSA-2048",
-                    fontSize = 11.sp,
-                    color = BentoTextMuted
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { v -> pin = v.filter { it.isDigit() }.take(6) },
+                    label = { Text("PIN from the computer") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                    modifier = Modifier.fillMaxWidth().testTag("pairing_pin_field")
                 )
             }
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(pinSas) },
+                onClick = { onConfirm(pin) },
+                enabled = pin.length == 6,
                 colors = ButtonDefaults.buttonColors(containerColor = BentoPrimaryBlue, contentColor = Color.White),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.testTag("confirm_pairing_button")

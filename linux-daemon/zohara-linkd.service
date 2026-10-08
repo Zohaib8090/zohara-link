@@ -7,6 +7,16 @@ Type=simple
 ExecStart=/usr/bin/zohara-linkd
 Restart=always
 RestartSec=3
+# The daemon only needs the network, this user's files and the desktop session, so take the rest away.
+NoNewPrivileges=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+UMask=0077
 StandardOutput=journal
 StandardError=journal
 
