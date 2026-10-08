@@ -16,6 +16,8 @@ pub const MAX_PIN_TRIES: u32 = 3;
 /// A pairing PIN waiting for the phone to type it.
 pub struct PendingPin {
     pin: String,
+    /// The name the phone gave itself, for the pairing screen.
+    pub name: String,
     created: Instant,
     tries: u32,
 }
@@ -30,7 +32,16 @@ pub enum PinCheck {
 
 impl PendingPin {
     pub fn new(pin: String) -> Self {
-        Self { pin, created: Instant::now(), tries: 0 }
+        Self { pin, name: String::new(), created: Instant::now(), tries: 0 }
+    }
+
+    pub fn pin(&self) -> &str {
+        &self.pin
+    }
+
+    /// Still usable: not too old and not out of tries. Only live PINs are shown to the person.
+    pub fn is_live(&self, now: Instant) -> bool {
+        self.tries < MAX_PIN_TRIES && now.duration_since(self.created) <= PIN_LIFETIME
     }
 
     /// Checks one attempt. A wrong attempt counts; the third wrong one (or age) makes the PIN useless.
@@ -102,6 +113,19 @@ mod tests {
         assert_eq!(p.check(None, now), PinCheck::Wrong);
         assert_eq!(p.check(Some("111111"), now), PinCheck::Expired);
         assert_eq!(p.check(Some("123456"), now), PinCheck::Expired);
+    }
+
+    #[test]
+    fn liveness_follows_tries_and_age() {
+        let mut p = PendingPin::new("123456".into());
+        let now = Instant::now();
+        assert!(p.is_live(now));
+        p.check(Some("0"), now);
+        p.check(Some("0"), now);
+        assert!(p.is_live(now));
+        p.check(Some("0"), now);
+        assert!(!p.is_live(now));
+        assert!(!PendingPin::new("1".into()).is_live(now + PIN_LIFETIME + Duration::from_secs(1)));
     }
 
     #[test]

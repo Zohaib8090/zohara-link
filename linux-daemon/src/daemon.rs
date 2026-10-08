@@ -313,7 +313,11 @@ impl Daemon {
         self.pending_pairings
             .lock()
             .await
-            .insert(req_device_id.clone(), auth::PendingPin::new(pin.clone()));
+            .insert(req_device_id.clone(), {
+                let mut p = auth::PendingPin::new(pin.clone());
+                p.name = req_device_name.clone();
+                p
+            });
         let short_fp = auth::short_fingerprint(&self.fingerprint);
 
         log::info!("*** PAIRING AUTHORIZATION REQUIRED ***");
@@ -636,8 +640,17 @@ impl Daemon {
                 let connected: Vec<String> = self.authenticated_connections.lock().await.values().cloned().collect();
                 let telemetry = self.device_telemetry.lock().await.clone();
                 let active: Vec<_> = self.active_file_transfers.lock().await.keys().cloned().collect();
+                let now = Instant::now();
+                let pending: Vec<Value> = self
+                    .pending_pairings
+                    .lock()
+                    .await
+                    .iter()
+                    .filter(|(_, p)| p.is_live(now))
+                    .map(|(id, p)| json!({"deviceId": id, "name": p.name, "pin": p.pin()}))
+                    .collect();
                 let pairing_open = matches!(*self.pairing_open_until.lock().await, Some(t) if t > Instant::now());
-                json!({"paired_devices": paired, "connected_device_ids": connected, "pairing_open": pairing_open, "telemetry": telemetry, "active_transfers": active})
+                json!({"paired_devices": paired, "connected_device_ids": connected, "pairing_open": pairing_open, "pending_pairings": pending, "telemetry": telemetry, "active_transfers": active})
             }
             Some("GET_IDENTITY") => {
                 json!({
