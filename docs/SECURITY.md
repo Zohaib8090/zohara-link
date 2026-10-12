@@ -33,6 +33,16 @@ The Android changes are **not compiled or run yet** (no Android toolchain in the
   at most 4 at once, and a transfer that sends more than it declared is cancelled and its partial file deleted.
 * Notification text from the phone is stripped of control characters and cut to a sane length.
 
+## Notifications, media and files (2026-10-12)
+
+* Phone notifications are filtered on the phone (ongoing, progress, media, service and group-summary ones are never sent; identical
+  re-posts are dropped; the person can switch an app off) and again on the computer (the same app + title + text is shown once per
+  two minutes; one app shows at most 12 a minute).
+* Media: the buttons work through `playerctl` or, without it, MPRIS over D-Bus; the computer tells the phone what is playing.
+* Files: the phone waits for the computer's yes or no (too large, too many at once) before streaming. A transfer cut off by a
+  dropped connection is removed together with its partial file. A declared size of 0 means "unknown" (limited only by the 4 GB cap).
+* Locking the screen from the phone needs the same per-phone permission as the mouse.
+
 ## Against attacks on the daemon itself
 
 * One packet line is at most 256 KB (a file chunk is about 44 KB). A longer line closes the connection instead of filling memory.
@@ -48,4 +58,7 @@ The Android changes are **not compiled or run yet** (no Android toolchain in the
 * The daemon listens on all interfaces; only the pairing/auth rules above stop a stranger, not a firewall. Zohara does not ship
   a firewall rule for port 42424.
 * Remote input and file receiving trust the paired phone completely once allowed.
-* Never tested on a phone yet: the Android pinning, token reconnect and the new PIN dialog.
+* Never tested on a phone yet: the Android pinning, token reconnect, the new PIN dialog, notification filtering, file transfer, the
+  self-update. CI builds the app; nobody has run it.
+* The app's self-update trusts Android's own check that the new APK has the same signing key as the installed app. Whoever holds the
+  signing key can push an update to every phone: keep the key in GitHub secrets and two offline copies, never in git.
