@@ -4,8 +4,7 @@ The Zohara OS companion app: pairs an Android phone with a Zohara Linux
 desktop over the local network (mDNS discovery + TLS) for shared
 clipboard, file transfer, notification mirroring, and remote input.
 
-- `app/` — the Android app (Kotlin, Jetpack Compose), built with
-  [AI Studio](https://ai.studio/apps/9cb9486d-d7a9-4e8a-9966-ce1ad3104b63).
+- `app/` — the Android app (Kotlin, Jetpack Compose),
 - `linux-daemon/` — `zohara-linkd`, the Rust daemon it pairs with (Tokio +
   rustls + rcgen + mdns-sd; rewritten 2026-09-23 from an earlier Python
   prototype — no Python involved anymore). Note there is a *second*,
