@@ -30,7 +30,7 @@ class MainActivity : ComponentActivity() {
         handleIncomingIntent(intent)
 
         setContent {
-            ZlApp(viewModel = viewModel)
+            ZlApp(vm = viewModel)
         }
     }
 
