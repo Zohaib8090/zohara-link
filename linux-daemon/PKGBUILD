@@ -6,15 +6,14 @@ pkgdesc="Zohara Link Linux companion daemon (pairs with the Zohara Link Android 
 arch=('x86_64')
 url="https://github.com/Zohaib8090/zohara-link"
 license=('MIT' 'GPL-3.0-or-later')
-depends=('gcc-libs')
+# These are what the buttons on the phone run: media keys (playerctl), the clipboard (wl-clipboard), the pointer (ydotool) and
+# desktop notifications (libnotify). All are in the Arch repositories and the ISO already has them; listing them here makes an
+# update install them on machines that do not.
+depends=('gcc-libs' 'playerctl' 'wl-clipboard' 'ydotool' 'libnotify')
 makedepends=('cargo')
 optdepends=(
-  'wl-clipboard: clipboard sync on Wayland'
   'xclip: clipboard sync on X11'
-  'ydotool: remote pointer control on Wayland'
   'xdotool: remote pointer control on X11'
-  'playerctl: remote media control (MPRIS2)'
-  'libnotify: desktop notifications (notify-send)'
   'hyprlock: proximity screen lock (Hyprland)'
   'swaylock: proximity screen lock (sway)'
 )

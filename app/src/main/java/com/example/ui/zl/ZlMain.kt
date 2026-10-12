@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
@@ -374,11 +375,14 @@ fun RemoteScreen(
                         if (media.title.isBlank() || media.title == "No media playing") "Nothing playing" else media.title,
                         color = Zl.text, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
+                    if (media.artist.isNotBlank()) {
+                        Text(media.artist, color = Zl.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
                 }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     RoundIcon(Icons.Filled.SkipPrevious, "Previous", 56, Zl.bg, Zl.text) { onMedia("PREVIOUS") }
                     Spacer(Modifier.size(20.dp))
-                    RoundIcon(Icons.Filled.PlayArrow, "Play or pause", 68, Zl.accent, Zl.accentInk) { onMedia("PLAY_PAUSE") }
+                    RoundIcon(if (media.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (media.isPlaying) "Pause" else "Play", 68, Zl.accent, Zl.accentInk) { onMedia("PLAY_PAUSE") }
                     Spacer(Modifier.size(20.dp))
                     RoundIcon(Icons.Filled.SkipNext, "Next", 56, Zl.bg, Zl.text) { onMedia("NEXT") }
                 }

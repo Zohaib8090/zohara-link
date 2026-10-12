@@ -346,14 +346,37 @@ class TlsSocketEngine(private val context: Context) {
         sendJson(msg)
     }
 
+    // Finger movements arrive 100 times a second or more; sending each one made the pointer lag behind the finger. They are added
+    // up here and sent about 60 times a second as one move.
+    private val moveLock = Any()
+    private var pendingDx = 0f
+    private var pendingDy = 0f
+    private var moveJob: Job? = null
+
     fun sendInputMove(dx: Float, dy: Float) {
-        val msg = JSONObject().apply {
-            put("type", ProtocolTypes.INPUT_EVENT)
-            put("action", "MOVE")
-            put("dx", dx)
-            put("dy", dy)
+        synchronized(moveLock) {
+            pendingDx += dx
+            pendingDy += dy
         }
-        sendJson(msg)
+        if (moveJob?.isActive == true) return
+        moveJob = scope.launch {
+            while (isActive) {
+                delay(16)
+                val (x, y) = synchronized(moveLock) {
+                    val taken = pendingDx to pendingDy
+                    pendingDx = 0f
+                    pendingDy = 0f
+                    taken
+                }
+                if (x == 0f && y == 0f) break
+                sendJson(JSONObject().apply {
+                    put("type", ProtocolTypes.INPUT_EVENT)
+                    put("action", "MOVE")
+                    put("dx", x.toDouble())
+                    put("dy", y.toDouble())
+                })
+            }
+        }
     }
 
     fun sendInputClick(button: String = "LEFT") {
@@ -438,8 +461,12 @@ class TlsSocketEngine(private val context: Context) {
         }
     }
 
+    // One writer thread: packets leave in the order they were queued. Before, every packet was its own coroutine on a pool of
+    // threads, so a click could overtake the moves before it and a stream of moves arrived jumbled.
+    private val sendDispatcher = Dispatchers.IO.limitedParallelism(1)
+
     private fun sendJson(json: JSONObject) {
-        scope.launch {
+        scope.launch(sendDispatcher) {
             try {
                 val w = writer ?: return@launch
                 val line = json.toString()

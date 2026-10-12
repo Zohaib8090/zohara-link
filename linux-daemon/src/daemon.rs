@@ -52,6 +52,8 @@ pub struct Daemon {
     device_telemetry: TokioMutex<HashMap<String, Value>>,
     active_file_transfers: TokioMutex<HashMap<String, FileTransfer>>,
     last_clipboard_text: TokioMutex<String>,
+    /// The last "now playing" state pushed to phones, so a phone that connects later gets it at once.
+    last_media: TokioMutex<Option<Value>>,
     /// Fan-out to local Unix-socket IPC clients (Waybar, a GTK settings
     /// panel, `zohara-link-status`, ...).
     ipc_broadcast: broadcast::Sender<String>,
@@ -99,6 +101,7 @@ impl Daemon {
             device_telemetry: TokioMutex::new(HashMap::new()),
             active_file_transfers: TokioMutex::new(HashMap::new()),
             last_clipboard_text: TokioMutex::new(String::new()),
+            last_media: TokioMutex::new(None),
             ipc_broadcast,
         }))
     }
@@ -131,6 +134,10 @@ impl Daemon {
         {
             let this = self.clone();
             tokio::spawn(async move { this.clipboard_watcher_loop().await });
+        }
+        {
+            let this = self.clone();
+            tokio::spawn(async move { this.media_watcher_loop().await });
         }
 
         loop {
@@ -278,8 +285,9 @@ impl Daemon {
                 }
             }
             "MEDIA_CONTROL" => {
-                let action = packet.get("action").and_then(Value::as_str).unwrap_or("");
-                desktop::control_mpris2_media(action);
+                let action = packet.get("action").and_then(Value::as_str).unwrap_or("").to_string();
+                // Talking to the player can take a moment: never on the thread that serves the connection.
+                tokio::task::spawn_blocking(move || desktop::control_mpris2_media(&action));
             }
             "PROXIMITY_HEARTBEAT" => {}
             _ => {}
@@ -458,6 +466,9 @@ impl Daemon {
             self.save_paired_devices().await;
             self.broadcast_local_ipc("DEVICE_CONNECTED", json!({"deviceId": req_device_id})).await;
             let _ = send_json(writer, &json!({"type": "AUTH_RESULT", "status": "SUCCESS", "serverName": hostname()})).await;
+            if let Some(m) = self.last_media.lock().await.clone() {
+                let _ = send_json(writer, &m).await;
+            }
         } else {
             log::warn!("AUTH refused for device '{req_device_id}' on {device_id}");
             // A short pause makes guessing a token from the network pointless.
@@ -752,6 +763,27 @@ impl Daemon {
                     "source": "linux",
                     "timestamp": unix_time(),
                 });
+                self.broadcast_to_devices(&packet).await;
+            }
+        }
+    }
+
+    /// Tells the phones what is playing on this computer (title, artist, playing or paused) whenever it changes.
+    async fn media_watcher_loop(self: Arc<Self>) {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            if self.authenticated_connections.lock().await.is_empty() {
+                continue; // nobody to tell
+            }
+            let now = tokio::task::spawn_blocking(desktop::now_playing).await.ok().flatten();
+            let packet = match now {
+                Some(n) => json!({"type": "MEDIA_CONTROL", "title": n.title, "artist": n.artist, "isPlaying": n.playing}),
+                None => json!({"type": "MEDIA_CONTROL", "title": "", "artist": "", "isPlaying": false}),
+            };
+            let mut last = self.last_media.lock().await;
+            if last.as_ref() != Some(&packet) {
+                *last = Some(packet.clone());
+                drop(last);
                 self.broadcast_to_devices(&packet).await;
             }
         }
