@@ -35,6 +35,8 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.network.ConnectionState
+import com.example.update.AppUpdater
+import com.example.update.UpdateInfo
 import com.example.viewmodel.EcosystemViewModel
 import kotlinx.coroutines.launch
 
@@ -67,9 +69,51 @@ fun ZlApp(vm: EcosystemViewModel) {
     var lastError by remember { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
 
+    // The app's own update (see AppUpdater): look once when the app opens, and again when the person asks.
+    val installedBuild = remember { AppUpdater.installed(context) }
+    var update by remember { mutableStateOf<UpdateInfo?>(null) }
+    var updateLine by remember { mutableStateOf("") }
+    var updating by remember { mutableStateOf(false) }
+
     fun say(text: String) {
         scope.launch { snackbar.showSnackbar(text) }
     }
+
+    suspend fun lookForUpdate(announce: Boolean) {
+        val info = AppUpdater.check()
+        update = info?.takeIf { it.versionCode > installedBuild.first }
+        updateLine = when {
+            info == null -> "Could not reach the update server. Try again when you are online."
+            update != null -> "Version ${info.versionName} is ready (you have ${installedBuild.second})."
+            else -> "You have the newest version."
+        }
+        if (announce) say(updateLine)
+    }
+
+    fun startUpdate() {
+        val info = update ?: return
+        if (updating) return
+        if (!AppUpdater.canInstall(context)) {
+            say("Allow Zohara Link to install apps, then press Update again.")
+            AppUpdater.openInstallPermission(context)
+            return
+        }
+        scope.launch {
+            updating = true
+            updateLine = "Downloading…"
+            val apk = AppUpdater.download(context, info) { pct -> updateLine = if (pct >= 0) "Downloading… $pct%" else "Downloading…" }
+            updating = false
+            if (apk == null) {
+                updateLine = "The download did not finish. Try again."
+                say(updateLine)
+            } else {
+                updateLine = "Ready to install: confirm on the next screen."
+                AppUpdater.install(context, apk)
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { lookForUpdate(announce = false) }
 
     val knownComputer = paired.maxByOrNull { it.lastSeenTimestamp }
 
@@ -210,6 +254,8 @@ fun ZlApp(vm: EcosystemViewModel) {
                                 onRemote = { screen = ZlScreen.REMOTE },
                                 onLock = { if (connected) vm.sendLockDesktop() else say("Not connected to the computer") },
                                 onAlerts = { vm.setAlertsEnabled(it) },
+                                updateText = update?.let { if (updating) updateLine else "Version ${it.versionName} (you have ${installedBuild.second})" },
+                                onUpdate = { startUpdate() },
                             )
                             ZlScreen.FILES -> FilesScreen(
                                 computerName = computerName,
@@ -233,6 +279,9 @@ fun ZlApp(vm: EcosystemViewModel) {
                                 mutedApps = mutedApps,
                                 onSetMuted = { pkg, muted -> vm.setAppMuted(pkg, muted); mutedApps = vm.mutedApps() },
                                 onAlerts = { vm.setAlertsEnabled(it) },
+                                versionLabel = "Version ${installedBuild.second} (build ${installedBuild.first})",
+                                updateLine = updateLine,
+                                onCheckUpdate = { scope.launch { updateLine = "Checking…"; lookForUpdate(announce = true) } },
                                 onOpenNotificationAccess = {
                                     context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                                 },

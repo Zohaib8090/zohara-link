@@ -109,6 +109,8 @@ fun HomeScreen(
     onRemote: () -> Unit,
     onLock: () -> Unit,
     onAlerts: (Boolean) -> Unit,
+    updateText: String?,
+    onUpdate: () -> Unit,
 ) {
     Column(
         Page
@@ -116,6 +118,15 @@ fun HomeScreen(
             .padding(horizontal = 24.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
+        if (updateText != null) {
+            ZlCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("A new version of Zohara Link is ready", color = Zl.text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(updateText, color = Zl.muted, fontSize = 13.sp)
+                    PrimaryButton("Update now", onClick = onUpdate)
+                }
+            }
+        }
         val shape = RoundedCornerShape(24.dp)
         Column(
             Modifier
@@ -418,6 +429,9 @@ fun AccessScreen(
     onSetMuted: (String, Boolean) -> Unit,
     onAlerts: (Boolean) -> Unit,
     onOpenNotificationAccess: () -> Unit,
+    versionLabel: String,
+    updateLine: String,
+    onCheckUpdate: () -> Unit,
     onForget: () -> Unit,
 ) {
     var confirm by remember { mutableStateOf(false) }
@@ -505,6 +519,17 @@ fun AccessScreen(
                         "If this code ever changes, the phone refuses to connect and asks you to pair again.",
                         color = Zl.muted, fontSize = 12.5.sp, lineHeight = 18.sp,
                     )
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("This app")
+            ZlCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(versionLabel, color = Zl.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    if (updateLine.isNotEmpty()) Text(updateLine, color = Zl.muted, fontSize = 12.5.sp, lineHeight = 18.sp)
+                    SecondaryButton("Check for updates", onClick = onCheckUpdate)
                 }
             }
         }

@@ -17,8 +17,10 @@ android {
     applicationId = "com.aistudio.zoharaconnect.xkrw"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    // CI sets ZL_VERSION_CODE (it grows with every build) so each build can update the one before it; a local build is 1.
+    val zlCode = (System.getenv("ZL_VERSION_CODE") ?: "1").toInt()
+    versionCode = zlCode
+    versionName = "1.0.$zlCode"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

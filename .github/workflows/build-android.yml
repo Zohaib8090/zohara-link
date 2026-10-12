@@ -1,9 +1,15 @@
 name: Build Zohara Link Android app
 
-# Builds an installable APK of the phone app and keeps it as the run's artifact (30 days). Nothing is published anywhere:
-# you download the APK from the run page and install it on the phone (see docs/ANDROID.md).
-# It is a DEBUG build signed with a throwaway debug key made fresh on every run, so Android treats each build as a
-# different signer: uninstall the old app before installing a newer one (pairing is kept on the computer, the phone must pair again).
+# Builds the phone app.
+#
+# * Always: an APK as the run's artifact (30 days).
+# * When the signing key exists as GitHub secrets (ANDROID_KEYSTORE_B64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD) and the
+#   build is on main: a SIGNED release APK, published as the GitHub release `android-latest` (replaced each time). The app looks at
+#   that release, offers the update, and Android installs it over the old app because the signing key is always the same.
+# * Without the secrets: a DEBUG APK signed with a throwaway key made fresh for the run. It installs, but not over a build signed
+#   with another key, and it is never published as an update.
+#
+# The build number (versionCode) is the run number plus 100: it only ever grows, which is what lets a build update the one before.
 
 on:
   push:
@@ -15,6 +21,9 @@ on:
       - 'gradle/**'
       - '.github/workflows/build-android.yml'
   workflow_dispatch:
+
+permissions:
+  contents: write   # to publish the android-latest release
 
 jobs:
   apk:
@@ -32,8 +41,24 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Build number
+        run: echo "ZL_VERSION_CODE=$((GITHUB_RUN_NUMBER + 100))" >> "$GITHUB_ENV"
+
+      - name: Release signing key (only when the secrets exist)
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "SIGNED=true" >> "$GITHUB_ENV"
+            echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "::notice::Signing with the release key"
+          else
+            echo "::notice::No release key: building a debug APK (never published as an update)"
+          fi
+
       # The project's debug signing config points at ./debug.keystore, which is (rightly) not in git.
-      - name: Make a debug signing key
+      - name: Make a throwaway debug signing key
         run: |
           keytool -genkeypair -v -keystore debug.keystore -storepass android -keypass android \
             -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 \
@@ -42,13 +67,24 @@ jobs:
       - name: Accept Android SDK licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
 
-      - name: Build the debug APK
-        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: Build the APK
+        env:
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ "${SIGNED:-}" = "true" ]; then
+            gradle :app:assembleRelease --no-daemon --stacktrace
+            cp app/build/outputs/apk/release/*.apk "$RUNNER_TEMP/zohara-link-android.apk"
+          else
+            gradle :app:assembleDebug --no-daemon --stacktrace
+            cp app/build/outputs/apk/debug/*.apk "$RUNNER_TEMP/zohara-link-android.apk"
+          fi
 
       - name: Name the APK
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/debug/*.apk "out/zohara-link-${GITHUB_SHA::7}-debug.apk"
+          kind=$([ "${SIGNED:-}" = "true" ] && echo release || echo debug)
+          cp "$RUNNER_TEMP/zohara-link-android.apk" "out/zohara-link-build${ZL_VERSION_CODE}-${kind}.apk"
           sha256sum out/*.apk
 
       - uses: actions/upload-artifact@v4
@@ -56,3 +92,17 @@ jobs:
           name: zohara-link-android-apk
           path: out/*.apk
           retention-days: 30
+
+      # Only a signed build on main becomes the update the phones are offered.
+      - name: Publish the update (android-latest release)
+        if: env.SIGNED == 'true' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp "$RUNNER_TEMP/zohara-link-android.apk" zohara-link-android.apk
+          gh release delete android-latest --cleanup-tag --yes || true
+          gh release create android-latest zohara-link-android.apk \
+            --prerelease \
+            --title "Zohara Link for Android (latest build)" \
+            --notes "versionCode=${ZL_VERSION_CODE} versionName=1.0.${ZL_VERSION_CODE} commit=${GITHUB_SHA::7}
+          The app offers this build as its update. To install by hand, download the APK below."
