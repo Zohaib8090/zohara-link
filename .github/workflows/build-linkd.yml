@@ -53,12 +53,13 @@ jobs:
           echo "version=$VER" >> "$GITHUB_OUTPUT"
 
       # The PKGBUILD's build() runs `cargo build --release --locked`, so
-      # makepkg is also the compile check.
+      # makepkg is also the compile check. --nodeps: the runtime dependencies (playerctl, ydotool, ...) are for the computer the
+      # package is installed on, not for this build container.
       - name: Run makepkg
         run: |
           chown -R builder:builder .
           cd linux-daemon
-          sudo -u builder env _PKGVER="${{ steps.version.outputs.version }}" makepkg --nocheck --skippgpcheck
+          sudo -u builder env _PKGVER="${{ steps.version.outputs.version }}" makepkg --nocheck --skippgpcheck --nodeps
           PKG_FILE=$(ls *.pkg.tar.zst | head -1)
           echo "package_file=$PKG_FILE" >> "$GITHUB_ENV"
           echo "package_path=linux-daemon/$PKG_FILE" >> "$GITHUB_ENV"
