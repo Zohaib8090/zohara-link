@@ -53,6 +53,7 @@ fun ZlApp(vm: EcosystemViewModel) {
     val conn by vm.connectionState.collectAsStateWithLifecycle()
     val paired by vm.pairedDevices.collectAsStateWithLifecycle()
     val discovered by vm.discoveredDevices.collectAsStateWithLifecycle()
+    val scanning by vm.isScanning.collectAsStateWithLifecycle()
     val transfers by vm.transfers.collectAsStateWithLifecycle()
     val clips by vm.clipboardHistory.collectAsStateWithLifecycle()
     val media by vm.mediaState.collectAsStateWithLifecycle()
@@ -118,6 +119,14 @@ fun ZlApp(vm: EcosystemViewModel) {
         onDispose { vm.stopDiscovery() }
     }
 
+    // Automatic discovery (mDNS) is blocked on some Wi-Fi networks: if nothing turned up after a few seconds, scan the Wi-Fi instead.
+    LaunchedEffect(screen == ZlScreen.FIND) {
+        if (screen == ZlScreen.FIND) {
+            kotlinx.coroutines.delay(5000)
+            if (discovered.isEmpty()) vm.scanNetwork()
+        }
+    }
+
     BackHandler(enabled = screen != ZlScreen.HOME && screen != ZlScreen.WELCOME) {
         screen = when (screen) {
             ZlScreen.FIND -> ZlScreen.WELCOME
@@ -156,10 +165,12 @@ fun ZlApp(vm: EcosystemViewModel) {
                 ZlScreen.WELCOME -> WelcomeScreen(onStart = { lastError = null; screen = ZlScreen.FIND })
                 ZlScreen.FIND -> FindScreen(
                     devices = discovered,
+                    scanning = scanning,
                     connecting = connecting,
                     error = lastError,
                     onPick = { d -> lastError = null; vm.connectToHost(d.hostAddress, d.port, false) },
                     onManual = { host -> lastError = null; vm.connectToHost(host, 42424, false) },
+                    onScan = { vm.scanNetwork() },
                     onBack = { screen = ZlScreen.WELCOME },
                 )
                 ZlScreen.PAIR -> PairScreen(

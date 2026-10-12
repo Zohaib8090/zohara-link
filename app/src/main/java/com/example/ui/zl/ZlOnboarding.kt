@@ -162,10 +162,12 @@ fun WelcomeScreen(onStart: () -> Unit) {
 @Composable
 fun FindScreen(
     devices: List<DiscoveredDevice>,
+    scanning: Boolean,
     connecting: Boolean,
     error: String?,
     onPick: (DiscoveredDevice) -> Unit,
     onManual: (String) -> Unit,
+    onScan: () -> Unit,
     onBack: () -> Unit,
 ) {
     var manualOpen by remember { mutableStateOf(false) }
@@ -189,16 +191,21 @@ fun FindScreen(
 
         Spacer(Modifier.height(28.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            CircularProgressIndicator(color = Zl.accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+            if (scanning || connecting) {
+                CircularProgressIndicator(color = Zl.accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+            }
             Text(
-                if (connecting) "CONNECTING" else "LOOKING NEARBY",
+                if (connecting) "CONNECTING" else if (scanning) "LOOKING NEARBY" else if (devices.isEmpty()) "NOTHING FOUND" else "FOUND",
                 color = Zl.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
             )
         }
         Spacer(Modifier.height(14.dp))
 
-        if (devices.isEmpty()) {
-            Text("Nothing found yet.", color = Zl.muted, fontSize = 14.sp)
+        if (devices.isEmpty() && !scanning) {
+            Text(
+                "Make sure the computer is on this same Wi-Fi and Zohara Link is turned on in its Settings. Some Wi-Fi networks block automatic discovery: then scan the Wi-Fi below or type the address (shown in Settings > Zohara Link on the computer).",
+                color = Zl.muted, fontSize = 14.sp, lineHeight = 21.sp,
+            )
         }
         devices.forEach { d ->
             val shape = RoundedCornerShape(20.dp)
@@ -255,6 +262,8 @@ fun FindScreen(
             )
         }
         Spacer(Modifier.height(20.dp))
+        SecondaryButton("Scan my Wi-Fi for computers") { onScan() }
+        Spacer(Modifier.height(10.dp))
         SecondaryButton("Type the computer's address instead") { manualOpen = true }
         Spacer(Modifier.height(24.dp))
     }

@@ -238,6 +238,11 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         nsdManager.stopDiscovery()
     }
 
+    /** Look for computers by trying every address on this Wi-Fi, for networks where automatic discovery (mDNS) does not work. */
+    fun scanNetwork() {
+        nsdManager.scanLocalNetwork()
+    }
+
     /** Messages from the computer worth showing (for example: mouse control is not allowed for this phone). */
     val notices get() = socketEngine.notices
 
