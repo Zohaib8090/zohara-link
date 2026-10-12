@@ -9,7 +9,9 @@ import com.example.model.MediaControlState
 import com.example.model.MirroredNotification
 import com.example.model.ProtocolTypes
 import com.example.model.TelemetryData
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -241,6 +243,11 @@ class TlsSocketEngine(private val context: Context) {
                 }
                 _connectionState.value = ConnectionState.PairingRequired(shortFingerprint(observedFingerprint), serverName)
             }
+            ProtocolTypes.FILE_ACCEPT -> {
+                val accepted = json.optBoolean("accepted", true)
+                val reason = if (accepted) "" else json.optString("error", "refused")
+                pendingAccepts[json.optString("transferId")]?.complete(reason)
+            }
             "ERROR" -> {
                 val why = json.optString("error")
                 if (why.isNotEmpty()) _notices.tryEmit(why)
@@ -348,6 +355,9 @@ class TlsSocketEngine(private val context: Context) {
 
     // Finger movements arrive 100 times a second or more; sending each one made the pointer lag behind the finger. They are added
     // up here and sent about 60 times a second as one move.
+    // The computer answers each file offer with yes or a reason for no; "" means yes.
+    private val pendingAccepts = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<String>>()
+
     private val moveLock = Any()
     private var pendingDx = 0f
     private var pendingDy = 0f
@@ -413,7 +423,24 @@ class TlsSocketEngine(private val context: Context) {
                     put("fileName", fileName)
                     put("fileSize", fileSize)
                 }
+                val answer = CompletableDeferred<String>()
+                pendingAccepts[transferId] = answer
                 sendJson(offer)
+
+                // The computer says yes or why not (too large, too many at once). Without waiting, a refused file was streamed into
+                // nothing and the transfer looked stuck.
+                val verdict = withTimeoutOrNull(8000) { answer.await() }
+                pendingAccepts.remove(transferId)
+                if (verdict == null) {
+                    _notices.tryEmit("The computer did not answer. Is Zohara Link turned on there?")
+                    onComplete(false)
+                    return@launch
+                }
+                if (verdict.isNotEmpty()) {
+                    _notices.tryEmit("The computer did not accept $fileName: $verdict")
+                    onComplete(false)
+                    return@launch
+                }
 
                 // 2. Read chunks and stream
                 val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
@@ -425,6 +452,7 @@ class TlsSocketEngine(private val context: Context) {
                 val buffer = ByteArray(32 * 1024) // 32KB chunks
                 var bytesRead: Int
                 var totalSent = 0L
+                var lastPercent = -1
 
                 inputStream.use { stream ->
                     while (stream.read(buffer).also { bytesRead = it } != -1) {
@@ -439,9 +467,13 @@ class TlsSocketEngine(private val context: Context) {
                         sendJson(chunkMsg)
                         totalSent += bytesRead
 
-                        val progress = ((totalSent.toDouble() / fileSize.coerceAtLeast(1)) * 100).toInt()
-                        onProgress(progress)
-                        delay(5) // Avoid overflowing socket buffer
+                        // Unknown size (0): no percentage to show. Report only when the percentage changes, not for every 32 KB.
+                        val progress = if (fileSize > 0) ((totalSent.toDouble() / fileSize) * 100).toInt().coerceAtMost(99) else 0
+                        if (progress != lastPercent) {
+                            lastPercent = progress
+                            onProgress(progress)
+                        }
+                        delay(2) // Avoid overflowing socket buffer
                     }
                 }
 

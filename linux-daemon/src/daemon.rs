@@ -54,6 +54,8 @@ pub struct Daemon {
     last_clipboard_text: TokioMutex<String>,
     /// The last "now playing" state pushed to phones, so a phone that connects later gets it at once.
     last_media: TokioMutex<Option<Value>>,
+    /// Drops repeated and flooding phone notifications before they reach the desktop.
+    notify_gate: std::sync::Mutex<limits::NotifyGate>,
     /// Fan-out to local Unix-socket IPC clients (Waybar, a GTK settings
     /// panel, `zohara-link-status`, ...).
     ipc_broadcast: broadcast::Sender<String>,
@@ -102,6 +104,7 @@ impl Daemon {
             active_file_transfers: TokioMutex::new(HashMap::new()),
             last_clipboard_text: TokioMutex::new(String::new()),
             last_media: TokioMutex::new(None),
+            notify_gate: std::sync::Mutex::new(limits::NotifyGate::default()),
             ipc_broadcast,
         }))
     }
@@ -237,6 +240,7 @@ impl Daemon {
         }
 
         log::info!("Connection closed for {peer}");
+        self.drop_transfers_of(&device_id).await;
         self.active_connections.lock().await.remove(&device_id);
         self.authenticated_connections.lock().await.remove(&device_id);
     }
@@ -271,7 +275,7 @@ impl Daemon {
             "CLIPBOARD_SYNC" => self.handle_clipboard_sync(&packet).await,
             "TELEMETRY_STATUS" => self.handle_telemetry(device_id, packet).await,
             "NOTIFICATION_POST" => self.handle_notification_post(&packet).await,
-            "FILE_OFFER" => self.handle_file_offer(&packet, writer).await,
+            "FILE_OFFER" => self.handle_file_offer(device_id, &packet, writer).await,
             "FILE_CHUNK" => self.handle_file_chunk(&packet).await,
             "FILE_COMPLETE" => self.handle_file_complete(&packet).await,
             "INPUT_EVENT" => {
@@ -507,11 +511,20 @@ impl Daemon {
         let title = limits::clean_text(packet.get("title").and_then(Value::as_str).unwrap_or("Android Notification"), 120);
         let text = limits::clean_text(packet.get("text").and_then(Value::as_str).unwrap_or(""), 500);
         let app_name = limits::clean_text(packet.get("appName").and_then(Value::as_str).unwrap_or("Phone"), 40);
+        let allowed = self
+            .notify_gate
+            .lock()
+            .map(|mut g| g.allow(&app_name, &title, &text, Instant::now()))
+            .unwrap_or(true);
+        if !allowed {
+            log::info!("repeated notification from {app_name} not shown again");
+            return;
+        }
         desktop::send_desktop_notification(&format!("[{app_name}] {title}"), &text);
         self.broadcast_local_ipc("NOTIFICATION_POSTED", packet.clone()).await;
     }
 
-    async fn handle_file_offer(&self, packet: &Value, writer: &SharedWriter) {
+    async fn handle_file_offer(&self, device_id: &str, packet: &Value, writer: &SharedWriter) {
         let transfer_id = packet.get("transferId").and_then(Value::as_str).unwrap_or("").to_string();
         let file_name = packet.get("fileName").and_then(Value::as_str).unwrap_or("received_file").to_string();
         let file_size = packet.get("fileSize").and_then(Value::as_u64).unwrap_or(0);
@@ -545,7 +558,7 @@ impl Daemon {
 
         self.active_file_transfers.lock().await.insert(
             transfer_id.clone(),
-            FileTransfer { file_name: file_name.clone(), file_size, dest_path, handle, received_bytes: 0 },
+            FileTransfer { owner: device_id.to_string(), file_name: file_name.clone(), file_size, dest_path, handle, received_bytes: 0 },
         );
 
         log::info!("Accepting incoming file: {file_name} ({file_size} bytes)");
@@ -555,6 +568,20 @@ impl Daemon {
             json!({"transferId": transfer_id, "fileName": file_name, "fileSize": file_size}),
         )
         .await;
+    }
+
+    /// A connection that dies mid-transfer leaves a half-written file and a slot in the transfer table; with enough of them
+    /// every later offer was refused ("too many transfers"). Remove them and the partial files.
+    async fn drop_transfers_of(&self, connection: &str) {
+        let mut transfers = self.active_file_transfers.lock().await;
+        let ids: Vec<String> = transfers.iter().filter(|(_, t)| t.owner == connection).map(|(id, _)| id.clone()).collect();
+        for id in ids {
+            if let Some(t) = transfers.remove(&id) {
+                log::warn!("transfer of {} was cut off; removing the partial file", t.file_name);
+                drop(t.handle);
+                let _ = std::fs::remove_file(&t.dest_path);
+            }
+        }
     }
 
     async fn handle_file_chunk(&self, packet: &Value) {
@@ -567,8 +594,14 @@ impl Daemon {
 
         let mut transfers = self.active_file_transfers.lock().await;
         let Some(info) = transfers.get_mut(transfer_id) else { return };
-        if info.received_bytes + data.len() as u64 > info.file_size {
-            // More than the phone said it would send: stop and delete the partial file.
+        // A declared size of 0 means the phone did not know it (some Android providers do not say): then only the overall limit
+        // applies. Otherwise more than declared is a broken or hostile sender: stop and delete the partial file.
+        let too_much = if info.file_size == 0 {
+            info.received_bytes + data.len() as u64 > limits::MAX_FILE_BYTES
+        } else {
+            info.received_bytes + data.len() as u64 > info.file_size
+        };
+        if too_much {
             log::warn!("transfer {transfer_id} sent more than its declared size; cancelled");
             let path = info.dest_path.clone();
             transfers.remove(transfer_id);

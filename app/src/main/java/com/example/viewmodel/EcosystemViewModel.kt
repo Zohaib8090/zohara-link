@@ -260,6 +260,21 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
     /** Whether phone notifications are mirrored to the computer (the system's notification access is separate). */
     val alertsEnabled: StateFlow<Boolean> = _alertsEnabled.asStateFlow()
 
+    /** Apps that have posted a notification since Zohara Link was installed: (package, name), by name. */
+    fun seenApps(): List<Pair<String, String>> =
+        (prefs.getStringSet("seen_apps", emptySet()) ?: emptySet())
+            .mapNotNull { e -> e.indexOf('\t').takeIf { it > 0 }?.let { e.substring(0, it) to e.substring(it + 1) } }
+            .sortedBy { it.second.lowercase() }
+
+    /** Packages whose notifications are not sent to the computer. */
+    fun mutedApps(): Set<String> = (prefs.getStringSet("muted_packages", emptySet()) ?: emptySet()).toSet()
+
+    fun setAppMuted(pkg: String, muted: Boolean) {
+        val now = mutedApps().toMutableSet()
+        if (muted) now.add(pkg) else now.remove(pkg)
+        prefs.edit().putStringSet("muted_packages", now).apply()
+    }
+
     fun setAlertsEnabled(on: Boolean) {
         _alertsEnabled.value = on
         prefs.edit().putBoolean("mirror_alerts", on).apply()

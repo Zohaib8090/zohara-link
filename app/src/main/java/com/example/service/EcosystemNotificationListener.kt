@@ -16,7 +16,9 @@ class EcosystemNotificationListener : NotificationListenerService() {
         super.onNotificationPosted(sbn)
         if (sbn == null || sbn.packageName == packageName) return // Ignore own notifications
         // The person can switch mirroring off inside the app (Access > Phone alerts).
-        if (!getSharedPreferences("zohara_settings", MODE_PRIVATE).getBoolean("mirror_alerts", true)) return
+        val prefs = getSharedPreferences("zohara_settings", MODE_PRIVATE)
+        if (!prefs.getBoolean("mirror_alerts", true)) return
+        if (shouldSkip(sbn, prefs)) return
 
         try {
             val extras = sbn.notification.extras
@@ -65,6 +67,46 @@ class EcosystemNotificationListener : NotificationListenerService() {
         }
     }
 
+    /**
+     * Not everything an app posts is a message. A health tracker's step counter, a music player, a download or navigation keep
+     * one notification on screen and re-post it every few seconds; mirroring each re-post made the same pop-up appear on the
+     * computer again and again. So: ongoing, foreground-service, progress, media and group-summary notifications are skipped,
+     * an identical re-post of the same notification is skipped, and apps the person switched off are skipped. The apps seen so
+     * far are remembered so the person can switch them off in the app (Access > Choose which apps).
+     */
+    private fun shouldSkip(sbn: StatusBarNotification, prefs: android.content.SharedPreferences): Boolean {
+        val n = sbn.notification
+        val skipFlags = Notification.FLAG_ONGOING_EVENT or Notification.FLAG_FOREGROUND_SERVICE or Notification.FLAG_GROUP_SUMMARY
+        if (n.flags and skipFlags != 0) return true
+        if (n.category == Notification.CATEGORY_PROGRESS || n.category == Notification.CATEGORY_TRANSPORT ||
+            n.category == Notification.CATEGORY_SERVICE || n.category == Notification.CATEGORY_SYSTEM
+        ) return true
+        if (n.extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0) > 0) return true
+
+        rememberApp(sbn.packageName, prefs)
+        if (prefs.getStringSet("muted_packages", emptySet())?.contains(sbn.packageName) == true) return true
+
+        val signature = (n.extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: "") + "\u0001" +
+            (n.extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: "")
+        synchronized(lastSignature) {
+            if (lastSignature[sbn.key] == signature) return true
+            if (lastSignature.size > 300) lastSignature.clear()
+            lastSignature[sbn.key] = signature
+        }
+        return false
+    }
+
+    private fun rememberApp(pkg: String, prefs: android.content.SharedPreferences) {
+        val known = prefs.getStringSet("seen_apps", emptySet()) ?: emptySet()
+        if (known.any { it.startsWith("$pkg\t") }) return
+        val label = try {
+            packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+        } catch (e: Exception) {
+            pkg
+        }
+        prefs.edit().putStringSet("seen_apps", known + "$pkg\t$label").apply()
+    }
+
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         super.onNotificationRemoved(sbn)
         if (sbn == null) return
@@ -80,6 +122,7 @@ class EcosystemNotificationListener : NotificationListenerService() {
         )
 
         private val replyActionMap = mutableMapOf<String, ActionReplyHolder>()
+        private val lastSignature = HashMap<String, String>()
         var onNotificationReceivedCallback: ((MirroredNotification) -> Unit)? = null
 
         fun sendRemoteReply(context: android.content.Context, replyKey: String, replyText: String): Boolean {

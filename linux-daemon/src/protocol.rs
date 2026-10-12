@@ -24,6 +24,8 @@ pub struct PairedDevice {
 }
 
 pub struct FileTransfer {
+    /// The connection that started it, so a dropped connection takes its half-finished transfers with it.
+    pub owner: String,
     pub file_name: String,
     pub file_size: u64,
     pub dest_path: std::path::PathBuf,

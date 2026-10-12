@@ -413,11 +413,15 @@ fun AccessScreen(
     code: String,
     alertsOn: Boolean,
     notificationAccessGranted: Boolean,
+    seenApps: () -> List<Pair<String, String>>,
+    mutedApps: Set<String>,
+    onSetMuted: (String, Boolean) -> Unit,
     onAlerts: (Boolean) -> Unit,
     onOpenNotificationAccess: () -> Unit,
     onForget: () -> Unit,
 ) {
     var confirm by remember { mutableStateOf(false) }
+    var appsOpen by remember { mutableStateOf(false) }
 
     Column(
         Page
@@ -445,6 +449,28 @@ fun AccessScreen(
                             if (notificationAccessGranted) "Allowed. Android lets Zohara Link read notifications."
                             else "Not allowed yet. Tap to open Android's setting and turn Zohara Link on.",
                             color = if (notificationAccessGranted) Zl.muted else Zl.accent, fontSize = 12.5.sp, lineHeight = 17.sp,
+                        )
+                    }
+                }
+            }
+        }
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            ZlCard {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 64.dp)
+                        .clickable(role = Role.Button) { appsOpen = true }
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Choose which apps", color = Zl.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            if (mutedApps.isEmpty()) "Every app is shown. Switch one off if it keeps repeating."
+                            else "${mutedApps.size} app(s) switched off",
+                            color = Zl.muted, fontSize = 12.5.sp, lineHeight = 17.sp,
                         )
                     }
                 }
@@ -485,6 +511,28 @@ fun AccessScreen(
 
         SecondaryButton("Forget this computer", danger = true) { confirm = true }
         Spacer(Modifier.height(8.dp))
+    }
+
+    if (appsOpen) {
+        val apps = remember { seenApps() }
+        AlertDialog(
+            onDismissRequest = { appsOpen = false },
+            containerColor = Zl.card,
+            title = { Text("Phone alerts from", color = Zl.text) },
+            text = {
+                if (apps.isEmpty()) {
+                    Text("Apps appear here after they send a notification.", color = Zl.muted, fontSize = 14.sp)
+                } else {
+                    androidx.compose.foundation.lazy.LazyColumn {
+                        items(apps.size) { i ->
+                            val (pkg, name) = apps[i]
+                            SwitchRow(name, pkg, checked = pkg !in mutedApps, onChange = { on -> onSetMuted(pkg, !on) })
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { appsOpen = false }) { Text("Done", color = Zl.accent) } },
+        )
     }
 
     if (confirm) {

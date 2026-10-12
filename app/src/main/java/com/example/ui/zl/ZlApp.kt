@@ -58,6 +58,7 @@ fun ZlApp(vm: EcosystemViewModel) {
     val clips by vm.clipboardHistory.collectAsStateWithLifecycle()
     val media by vm.mediaState.collectAsStateWithLifecycle()
     val alertsOn by vm.alertsEnabled.collectAsStateWithLifecycle()
+    var mutedApps by remember { mutableStateOf(vm.mutedApps()) }
 
     var screen by rememberSaveable { mutableStateOf(ZlScreen.WELCOME) }
     var started by rememberSaveable { mutableStateOf(false) }
@@ -228,6 +229,9 @@ fun ZlApp(vm: EcosystemViewModel) {
                                 code = vm.computerCode(),
                                 alertsOn = alertsOn,
                                 notificationAccessGranted = notificationAccess,
+                                seenApps = { vm.seenApps() },
+                                mutedApps = mutedApps,
+                                onSetMuted = { pkg, muted -> vm.setAppMuted(pkg, muted); mutedApps = vm.mutedApps() },
                                 onAlerts = { vm.setAlertsEnabled(it) },
                                 onOpenNotificationAccess = {
                                     context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

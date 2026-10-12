@@ -64,6 +64,36 @@ pub fn unique_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
         .unwrap_or_else(|| dir.join(format!("{stem}-{}{ext}", std::process::id())))
 }
 
+/// Stops the same phone notification showing again and again: apps such as a health tracker re-post their notification every few
+/// seconds, and each re-post arrived as a new pop-up. The same app, title and text is shown once per two minutes, and one app
+/// can show at most 12 pop-ups a minute whatever they say.
+#[derive(Default)]
+pub struct NotifyGate {
+    seen: std::collections::HashMap<String, std::time::Instant>,
+    per_app: std::collections::HashMap<String, Vec<std::time::Instant>>,
+}
+
+impl NotifyGate {
+    pub const REPEAT_WINDOW: std::time::Duration = std::time::Duration::from_secs(120);
+    pub const PER_APP_PER_MINUTE: usize = 12;
+
+    pub fn allow(&mut self, app: &str, title: &str, text: &str, now: std::time::Instant) -> bool {
+        self.seen.retain(|_, t| now.duration_since(*t) < Self::REPEAT_WINDOW);
+        let key = format!("{app}\u{1}{title}\u{1}{text}");
+        if self.seen.contains_key(&key) {
+            return false;
+        }
+        let recent = self.per_app.entry(app.to_string()).or_default();
+        recent.retain(|t| now.duration_since(*t) < std::time::Duration::from_secs(60));
+        if recent.len() >= Self::PER_APP_PER_MINUTE {
+            return false;
+        }
+        recent.push(now);
+        self.seen.insert(key, now);
+        true
+    }
+}
+
 /// Text for a desktop notification: control characters removed and the length capped, so a phone cannot flood or garble it.
 pub fn clean_text(s: &str, max_chars: usize) -> String {
     s.chars().filter(|c| !c.is_control() || *c == '\n').take(max_chars).collect()
@@ -104,6 +134,30 @@ mod tests {
         std::fs::write(&second, "x").unwrap();
         assert_eq!(unique_path(&d, "a.txt"), d.join("a (2).txt"));
         std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn the_same_notification_is_shown_once_not_every_few_seconds() {
+        let mut g = NotifyGate::default();
+        let t0 = std::time::Instant::now();
+        assert!(g.allow("Health", "Steps", "1,200 steps", t0));
+        assert!(!g.allow("Health", "Steps", "1,200 steps", t0 + std::time::Duration::from_secs(5)));
+        assert!(!g.allow("Health", "Steps", "1,200 steps", t0 + std::time::Duration::from_secs(100)));
+        // different text (a real new message) is shown, and the same text again after the window is shown too
+        assert!(g.allow("Health", "Steps", "1,300 steps", t0 + std::time::Duration::from_secs(6)));
+        assert!(g.allow("Health", "Steps", "1,200 steps", t0 + std::time::Duration::from_secs(130)));
+    }
+
+    #[test]
+    fn one_app_cannot_flood_the_desktop() {
+        let mut g = NotifyGate::default();
+        let t0 = std::time::Instant::now();
+        for i in 0..NotifyGate::PER_APP_PER_MINUTE {
+            assert!(g.allow("Chatty", "t", &format!("msg {i}"), t0));
+        }
+        assert!(!g.allow("Chatty", "t", "one more", t0));
+        assert!(g.allow("Other", "t", "hello", t0), "other apps are not affected");
+        assert!(g.allow("Chatty", "t", "later", t0 + std::time::Duration::from_secs(61)));
     }
 
     #[test]
