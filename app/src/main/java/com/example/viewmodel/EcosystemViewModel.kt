@@ -238,6 +238,28 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         nsdManager.stopDiscovery()
     }
 
+    /** Messages from the computer worth showing (for example: mouse control is not allowed for this phone). */
+    val notices get() = socketEngine.notices
+
+    fun computerCode(): String = socketEngine.computerCode()
+
+    /** Unpair from this phone's side: forget the pinned certificate and token, and remove the saved computer. */
+    fun forgetComputer(deviceId: String) {
+        socketEngine.forgetCurrentComputer()
+        unpairDevice(deviceId)
+        _isOnboardingCompleted.value = false
+        prefs.edit().putBoolean("onboarding_completed", false).apply()
+    }
+
+    private val _alertsEnabled = MutableStateFlow(prefs.getBoolean("mirror_alerts", true))
+    /** Whether phone notifications are mirrored to the computer (the system's notification access is separate). */
+    val alertsEnabled: StateFlow<Boolean> = _alertsEnabled.asStateFlow()
+
+    fun setAlertsEnabled(on: Boolean) {
+        _alertsEnabled.value = on
+        prefs.edit().putBoolean("mirror_alerts", on).apply()
+    }
+
     fun connectToHost(host: String, port: Int = 42424, isPaired: Boolean = false) {
         socketEngine.connect(host, port, isPaired)
     }

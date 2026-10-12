@@ -61,6 +61,10 @@ class TlsSocketEngine(private val context: Context) {
     private val _mediaState = MutableStateFlow(MediaControlState())
     val mediaState: StateFlow<MediaControlState> = _mediaState.asStateFlow()
 
+    /** Messages from the computer the person should see, e.g. "remote input is not allowed for this phone". */
+    private val _notices = MutableSharedFlow<String>(extraBufferCapacity = 8)
+    val notices: SharedFlow<String> = _notices.asSharedFlow()
+
     private val _latencyMs = MutableStateFlow(0L)
     val latencyMs: StateFlow<Long> = _latencyMs.asStateFlow()
 
@@ -236,6 +240,10 @@ class TlsSocketEngine(private val context: Context) {
                     return
                 }
                 _connectionState.value = ConnectionState.PairingRequired(shortFingerprint(observedFingerprint), serverName)
+            }
+            "ERROR" -> {
+                val why = json.optString("error")
+                if (why.isNotEmpty()) _notices.tryEmit(why)
             }
             ProtocolTypes.AUTH_RESULT -> {
                 if (json.optString("status") == "SUCCESS") {
@@ -440,6 +448,16 @@ class TlsSocketEngine(private val context: Context) {
                 Log.e(TAG, "Error writing socket: ${e.message}")
             }
         }
+    }
+
+    /** The short code of the computer this phone is (or was last) connected to; the same one its Settings page shows. */
+    fun computerCode(): String = if (observedFingerprint.isEmpty()) "" else shortFingerprint(observedFingerprint)
+
+    /** Forget the computer: drop its pinned certificate and token and disconnect. The phone must pair again to use it. */
+    fun forgetCurrentComputer() {
+        val fp = observedFingerprint
+        if (fp.isNotEmpty()) pinPrefs.edit().remove(fp).apply()
+        disconnect()
     }
 
     fun disconnect() {

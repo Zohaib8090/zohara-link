@@ -15,6 +15,8 @@ class EcosystemNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         super.onNotificationPosted(sbn)
         if (sbn == null || sbn.packageName == packageName) return // Ignore own notifications
+        // The person can switch mirroring off inside the app (Access > Phone alerts).
+        if (!getSharedPreferences("zohara_settings", MODE_PRIVATE).getBoolean("mirror_alerts", true)) return
 
         try {
             val extras = sbn.notification.extras

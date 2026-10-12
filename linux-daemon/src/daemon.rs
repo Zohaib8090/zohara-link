@@ -800,6 +800,8 @@ fn handle_input_event(packet: &Value) {
             let button = packet.get("button").and_then(Value::as_str).unwrap_or("LEFT");
             desktop::simulate_pointer_click(button);
         }
+        // Locking the screen is a form of remote control, so it needs the same permission as the mouse.
+        Some("LOCK_SCREEN") => desktop::trigger_screen_lock(),
         _ => {}
     }
 }

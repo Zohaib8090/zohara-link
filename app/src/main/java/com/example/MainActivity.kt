@@ -8,12 +8,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.service.EcosystemSyncService
-import com.example.ui.MainScreen
-import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.zl.ZlApp
 import com.example.viewmodel.EcosystemViewModel
 
 class MainActivity : ComponentActivity() {
@@ -34,14 +30,7 @@ class MainActivity : ComponentActivity() {
         handleIncomingIntent(intent)
 
         setContent {
-            val isDarkTheme by viewModel.isDarkTheme.collectAsStateWithLifecycle()
-            val isAutoTheme by viewModel.isAutoTheme.collectAsStateWithLifecycle()
-            val systemDark = isSystemInDarkTheme()
-            val effectiveDark = if (isAutoTheme) systemDark else isDarkTheme
-
-            MyApplicationTheme(darkTheme = effectiveDark) {
-                MainScreen(viewModel = viewModel)
-            }
+            ZlApp(viewModel = viewModel)
         }
     }
 
