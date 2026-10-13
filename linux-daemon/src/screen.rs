@@ -58,27 +58,79 @@ pub fn shrink_to_jpeg(bytes: &[u8], max_width: u32, quality: u8) -> Option<Frame
     Some(Frame { width: rgb.width(), height: rgb.height(), source_width: sw, source_height: sh, jpeg: out })
 }
 
-/// Takes one picture of the whole screen (PNG bytes). `ZOHARA_LINK_SCREEN_CMD` overrides the tool: a shell command that writes
-/// an image to the path in `$OUT` (tests use it; so can a person with an unusual setup).
-pub fn capture() -> Option<Vec<u8>> {
+/// The desktop session's environment, rebuilt when the daemon (a systemd user service) was not given it: without a Wayland
+/// socket, a display or the session bus, every capture tool fails with a message nobody sees. Pure so it can be tested.
+pub fn session_env(runtime_dir: &str, existing: &dyn Fn(&str) -> Option<String>, wayland_sockets: &[String]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    if existing("XDG_RUNTIME_DIR").is_none() {
+        out.push(("XDG_RUNTIME_DIR".to_string(), runtime_dir.to_string()));
+    }
+    if existing("WAYLAND_DISPLAY").is_none() {
+        if let Some(sock) = wayland_sockets.iter().find(|n| n.starts_with("wayland-") && !n.ends_with(".lock")) {
+            out.push(("WAYLAND_DISPLAY".to_string(), sock.clone()));
+        }
+    }
+    if existing("DISPLAY").is_none() {
+        out.push(("DISPLAY".to_string(), ":0".to_string()));
+    }
+    if existing("DBUS_SESSION_BUS_ADDRESS").is_none() {
+        out.push(("DBUS_SESSION_BUS_ADDRESS".to_string(), format!("unix:path={runtime_dir}/bus")));
+    }
+    out
+}
+
+fn desktop_env() -> Vec<(String, String)> {
+    let uid = unsafe { geteuid() };
+    let runtime = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| format!("/run/user/{uid}"));
+    let sockets: Vec<String> = std::fs::read_dir(&runtime)
+        .map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    session_env(&runtime, &|k| std::env::var(k).ok(), &sockets)
+}
+
+extern "C" {
+    fn geteuid() -> u32;
+}
+
+/// Takes one picture of the whole screen (PNG bytes), or says why not, in words a person can act on.
+/// `ZOHARA_LINK_SCREEN_CMD` overrides the tool: a shell command that writes an image to the path in `$OUT` (tests use it).
+pub fn capture() -> Result<Vec<u8>, String> {
     let dir = std::env::temp_dir().join(format!("zohara-link-screen-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
     let path = dir.join("frame.png");
     let p = path.to_string_lossy().to_string();
-    let _ = std::fs::remove_file(&path);
-    let ran = if let Some(cmd) = std::env::var_os("ZOHARA_LINK_SCREEN_CMD") {
-        Command::new("sh").arg("-c").arg(cmd).env("OUT", &p).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
+    let env = desktop_env();
+    let attempts: Vec<(String, Vec<String>)> = if let Some(cmd) = std::env::var_os("ZOHARA_LINK_SCREEN_CMD") {
+        vec![("sh".into(), vec!["-c".into(), cmd.to_string_lossy().into_owned()])]
     } else {
-        [("spectacle", vec!["-b", "-n", "-f", "-o", p.as_str()]), ("grim", vec![p.as_str()]), ("maim", vec![p.as_str()]), ("import", vec!["-window", "root", p.as_str()])]
-            .iter()
-            .any(|(cmd, args)| Command::new(cmd).args(args).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false))
+        vec![
+            ("spectacle".into(), vec!["-b".into(), "-n".into(), "-f".into(), "-o".into(), p.clone()]),
+            ("grim".into(), vec![p.clone()]),
+            ("maim".into(), vec![p.clone()]),
+            ("import".into(), vec!["-window".into(), "root".into(), p.clone()]),
+        ]
     };
-    if !ran {
-        return None;
+    let mut problems: Vec<String> = Vec::new();
+    for (cmd, args) in attempts {
+        let _ = std::fs::remove_file(&path);
+        let out = Command::new(&cmd).args(&args).envs(env.iter().map(|(k, v)| (k, v))).env("OUT", &p).stdin(Stdio::null()).output();
+        match out {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => problems.push(format!("{cmd} is not installed")),
+            Err(e) => problems.push(format!("{cmd}: {e}")),
+            Ok(o) => match std::fs::read(&path) {
+                Ok(bytes) if !bytes.is_empty() => {
+                    let _ = std::fs::remove_file(&path);
+                    return Ok(bytes);
+                }
+                _ => {
+                    let err = String::from_utf8_lossy(&o.stderr);
+                    let last = err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("it made no picture");
+                    problems.push(format!("{cmd}: {}", last.chars().take(160).collect::<String>()));
+                }
+            },
+        }
     }
-    let bytes = std::fs::read(&path).ok();
-    let _ = std::fs::remove_file(&path);
-    bytes
+    Err(problems.join("; "))
 }
 
 #[cfg(test)]
@@ -115,6 +167,23 @@ mod tests {
     #[test]
     fn garbage_is_no_frame() {
         assert!(shrink_to_jpeg(b"not an image", 640, 60).is_none());
+    }
+
+    #[test]
+    fn a_service_without_the_session_gets_one_built() {
+        let none = |_: &str| None;
+        let env = session_env("/run/user/1000", &none, &["bus".into(), "wayland-0.lock".into(), "wayland-0".into()]);
+        let get = |k: &str| env.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+        assert_eq!(get("WAYLAND_DISPLAY").as_deref(), Some("wayland-0"));
+        assert_eq!(get("XDG_RUNTIME_DIR").as_deref(), Some("/run/user/1000"));
+        assert_eq!(get("DBUS_SESSION_BUS_ADDRESS").as_deref(), Some("unix:path=/run/user/1000/bus"));
+        assert_eq!(get("DISPLAY").as_deref(), Some(":0"));
+    }
+
+    #[test]
+    fn what_the_session_already_has_is_left_alone() {
+        let all = |k: &str| Some(format!("set-{k}"));
+        assert!(session_env("/run/user/1000", &all, &["wayland-0".into()]).is_empty());
     }
 
     #[test]

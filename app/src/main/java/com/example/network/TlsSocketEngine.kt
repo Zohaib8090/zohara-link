@@ -79,6 +79,10 @@ class TlsSocketEngine(private val context: Context) {
     private val _screenFrame = MutableStateFlow<Bitmap?>(null)
     val screenFrame: StateFlow<Bitmap?> = _screenFrame.asStateFlow()
 
+    /** Why the screen is not showing, in the computer's words (null while pictures arrive). Shown on the remote desktop screen. */
+    private val _screenProblem = MutableStateFlow<String?>(null)
+    val screenProblem: StateFlow<String?> = _screenProblem.asStateFlow()
+
     private var socket: Socket? = null
     private var reader: BufferedReader? = null
     private var writer: PrintWriter? = null
@@ -284,6 +288,7 @@ class TlsSocketEngine(private val context: Context) {
             }
             "ERROR" -> {
                 val why = json.optString("error")
+                if (why.startsWith("viewing the screen")) _screenProblem.value = "The computer has not allowed this phone to see its screen. Turn on \"Show the screen\" for this phone in Settings > Zohara Link on the computer."
                 if (why.isNotEmpty()) _notices.tryEmit(why)
             }
             ProtocolTypes.AUTH_RESULT -> {
@@ -333,10 +338,11 @@ class TlsSocketEngine(private val context: Context) {
             ProtocolTypes.SCREEN_FRAME -> {
                 val bytes = Base64.decode(json.optString("jpegBase64"), Base64.DEFAULT)
                 _screenFrame.value = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: _screenFrame.value
+                _screenProblem.value = null
             }
             ProtocolTypes.SCREEN_STOPPED -> {
                 _screenFrame.value = null
-                _notices.tryEmit("The screen stopped: " + json.optString("reason", "the computer ended it"))
+                _screenProblem.value = json.optString("reason", "the computer ended it")
             }
             ProtocolTypes.PROXIMITY_HEARTBEAT -> {
                 val sentTs = json.optLong("clientTimestamp", 0L)
@@ -443,6 +449,7 @@ class TlsSocketEngine(private val context: Context) {
 
     // Remote desktop: watch the screen (the computer must have allowed it for this phone), and point, scroll and type on it.
     fun startScreen(maxWidth: Int = 1024, fps: Int = 2) {
+        _screenProblem.value = null
         sendJson(JSONObject().apply {
             put("type", ProtocolTypes.SCREEN_START)
             put("maxWidth", maxWidth)

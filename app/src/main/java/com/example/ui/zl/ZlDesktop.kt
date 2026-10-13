@@ -50,6 +50,7 @@ fun DesktopScreen(
     computerName: String,
     connected: Boolean,
     frame: Bitmap?,
+    problem: String?,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onTap: (Float, Float, Boolean) -> Unit,
@@ -82,8 +83,8 @@ fun DesktopScreen(
         val shape = RoundedCornerShape(14.dp)
         if (frame == null) {
             Text(
-                if (connected) "Waiting for the computer's screen…\nIf nothing appears, turn on \"Show the screen\" for this phone in Settings > Zohara Link on the computer."
-                else "Not connected to the computer.",
+                if (!connected) "Not connected to the computer."
+                else problem ?: "Waiting for the computer's screen…\nIf nothing appears, turn on \"Show the screen\" for this phone in Settings > Zohara Link on the computer.",
                 color = Zl.muted, fontSize = 14.sp, lineHeight = 20.sp,
                 modifier = Modifier.fillMaxWidth().clip(shape).background(Zl.card).padding(16.dp),
             )

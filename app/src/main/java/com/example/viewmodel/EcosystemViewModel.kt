@@ -468,6 +468,7 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     val screenFrame get() = socketEngine.screenFrame
+    val screenProblem get() = socketEngine.screenProblem
     fun startScreen() = socketEngine.startScreen()
     fun stopScreen() = socketEngine.stopScreen()
     fun sendInputMoveTo(x: Float, y: Float) = socketEngine.sendInputMoveTo(x, y)

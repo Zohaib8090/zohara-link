@@ -534,9 +534,13 @@ impl Daemon {
                     let _ = send_json(&writer, &json!({"type": "SCREEN_STOPPED", "reason": "not allowed"})).await;
                     break;
                 }
-                let frame = tokio::task::spawn_blocking(move || screen::capture().and_then(|b| screen::shrink_to_jpeg(&b, max_width, 60))).await.ok().flatten();
-                match frame {
-                    Some(f) => {
+                let shot = tokio::task::spawn_blocking(move || {
+                    screen::capture().and_then(|b| screen::shrink_to_jpeg(&b, max_width, 60).ok_or_else(|| "the picture could not be read".to_string()))
+                })
+                .await
+                .unwrap_or_else(|e| Err(e.to_string()));
+                match shot {
+                    Ok(f) => {
                         let hash = auth::fingerprint(&f.jpeg);
                         if hash != last_hash {
                             last_hash = hash;
@@ -550,8 +554,9 @@ impl Daemon {
                             }
                         }
                     }
-                    None => {
-                        let _ = send_json(&writer, &json!({"type": "SCREEN_STOPPED", "reason": "the computer could not take a picture of the screen (no Spectacle, grim or maim)"})).await;
+                    Err(why) => {
+                        log::warn!("screen capture failed for {this_conn}: {why}");
+                        let _ = send_json(&writer, &json!({"type": "SCREEN_STOPPED", "reason": format!("the computer could not take a picture of its screen ({why})")})).await;
                         break;
                     }
                 }

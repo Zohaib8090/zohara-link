@@ -29,8 +29,10 @@ minutes to find. (More traps for the whole project: `GOTCHA.md` in the `zohara` 
 
 * **Unasked packets break strict test readers.** After pairing or AUTH the daemon now also sends `ADDRESSES`. A test that reads
   "the next line" must skip it (`rd()` in `tests/e2e.py` does). The phone ignores types it does not know.
-* **Screen capture on Wayland needs Spectacle (Plasma) or grim; X11 needs maim/import.** None of them ships in the package
-  `depends` yet; without one the phone gets `SCREEN_STOPPED` with the reason. Absolute pointer moves (`ydotool mousemove --absolute`)
+* **Screen capture on Wayland needs Spectacle (Plasma) or grim; X11 needs maim/import.** Spectacle is in the package `depends` now.
+  A systemd user service may not have `WAYLAND_DISPLAY`, `DISPLAY` or the session bus; `screen::session_env` rebuilds them. When every
+  tool fails the phone shows each tool's reason (`SCREEN_STOPPED`) and the journal has it too. Proven here with real `maim` on Xvfb
+  only, not on Plasma/Wayland. Absolute pointer moves (`ydotool mousemove --absolute`)
   and wheel scrolling are written from the tools' documentation and not yet seen working on a real screen.
 
 ## Tests

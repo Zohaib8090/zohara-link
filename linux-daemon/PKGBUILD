@@ -9,7 +9,7 @@ license=('MIT' 'GPL-3.0-or-later')
 # These are what the buttons on the phone run: media keys (playerctl), the clipboard (wl-clipboard), the pointer (ydotool) and
 # desktop notifications (libnotify). All are in the Arch repositories and the ISO already has them; listing them here makes an
 # update install them on machines that do not.
-depends=('gcc-libs' 'playerctl' 'wl-clipboard' 'ydotool' 'libnotify')
+depends=('gcc-libs' 'playerctl' 'wl-clipboard' 'ydotool' 'libnotify' 'spectacle')
 makedepends=('cargo')
 optdepends=(
   'xclip: clipboard sync on X11'

@@ -228,10 +228,12 @@ fun ZlApp(vm: EcosystemViewModel) {
                 )
                 ZlScreen.DESKTOP -> {
                     val frame by vm.screenFrame.collectAsStateWithLifecycle()
+                    val problem by vm.screenProblem.collectAsStateWithLifecycle()
                     DesktopScreen(
                         computerName = computerName,
                         connected = connected,
                         frame = frame,
+                        problem = problem,
                         onStart = { vm.startScreen() },
                         onStop = { vm.stopScreen() },
                         onTap = { x, y, right -> vm.sendInputMoveTo(x, y); vm.sendInputClick(if (right) "RIGHT" else "LEFT") },
