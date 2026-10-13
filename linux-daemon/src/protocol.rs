@@ -21,6 +21,9 @@ pub struct PairedDevice {
     /// May this phone move the mouse and click? Off until the person allows it for that phone (Settings > Zohara Link).
     #[serde(default)]
     pub allow_input: bool,
+    /// May this phone watch the computer's screen? Off until allowed per phone (Settings > Zohara Link).
+    #[serde(default)]
+    pub allow_screen: bool,
 }
 
 pub struct FileTransfer {

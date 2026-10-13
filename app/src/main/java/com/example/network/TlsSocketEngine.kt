@@ -1,6 +1,8 @@
 package com.example.network
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.util.Base64
@@ -73,6 +75,10 @@ class TlsSocketEngine(private val context: Context) {
     private val _activeTransfers = MutableStateFlow<Map<String, Int>>(emptyMap())
     val activeTransfers: StateFlow<Map<String, Int>> = _activeTransfers.asStateFlow()
 
+    /** The computer's screen, newest picture (null when not watching). Shown by the remote desktop screen. */
+    private val _screenFrame = MutableStateFlow<Bitmap?>(null)
+    val screenFrame: StateFlow<Bitmap?> = _screenFrame.asStateFlow()
+
     private var socket: Socket? = null
     private var reader: BufferedReader? = null
     private var writer: PrintWriter? = null
@@ -91,7 +97,39 @@ class TlsSocketEngine(private val context: Context) {
     private var currentPort: Int = 42424
     private val deviceId = "android_${Build.MANUFACTURER}_${Build.MODEL}_${Build.ID}".replace(" ", "_")
 
+    // Other ways to reach the same computer (Tailscale and the like), learned from its ADDRESSES packet. When a paired computer
+    // cannot be reached at the saved address (the phone is away from home Wi-Fi), they are tried one after the other. The
+    // certificate is still pinned, so an address that leads to another machine is refused like any other.
+    private val overlayPrefs by lazy { context.getSharedPreferences("zohara_link_overlays", Context.MODE_PRIVATE) }
+    private val fallbackQueue = java.util.concurrent.ConcurrentLinkedQueue<String>()
+
+    fun overlayAddresses(): List<String> =
+        overlayPrefs.getString("last", "")?.split(",")?.filter { it.isNotBlank() } ?: emptyList()
+
+    private fun saveOverlayAddresses(json: JSONObject) {
+        val list = json.optJSONArray("overlays") ?: return
+        val addresses = (0 until list.length()).mapNotNull { list.optJSONObject(it)?.optString("address") }.filter { it.isNotBlank() }
+        overlayPrefs.edit().putString("last", addresses.joinToString(",")).apply()
+    }
+
+    private fun failOrFallback(isAlreadyPaired: Boolean, message: String) {
+        val next = if (isAlreadyPaired) fallbackQueue.poll() else null
+        if (next != null) {
+            Log.d(TAG, "Trying another route to the computer: $next")
+            connectInternal(next, currentPort, true)
+        } else {
+            _connectionState.value = ConnectionState.Error(message)
+            disconnect()
+        }
+    }
+
     fun connect(host: String, port: Int, isAlreadyPaired: Boolean = false) {
+        fallbackQueue.clear()
+        if (isAlreadyPaired) overlayAddresses().filter { it != host }.forEach { fallbackQueue.add(it) }
+        connectInternal(host, port, isAlreadyPaired)
+    }
+
+    private fun connectInternal(host: String, port: Int, isAlreadyPaired: Boolean) {
         disconnect()
         currentHost = host
         currentPort = port
@@ -160,20 +198,16 @@ class TlsSocketEngine(private val context: Context) {
                 listenLoop()
             } catch (e: java.net.SocketTimeoutException) {
                 Log.w(TAG, "Connection timed out to $host:$port: Node unreachable or firewall blocking port")
-                _connectionState.value = ConnectionState.Error("Node unreachable at $host:$port (Timed out)")
-                disconnect()
+                failOrFallback(isAlreadyPaired, "Node unreachable at $host:$port (Timed out)")
             } catch (e: java.net.ConnectException) {
                 Log.w(TAG, "Connection refused at $host:$port: Is zohara-daemon running on Linux?")
-                _connectionState.value = ConnectionState.Error("Connection refused by $host:$port")
-                disconnect()
+                failOrFallback(isAlreadyPaired, "Connection refused by $host:$port")
             } catch (e: java.net.NoRouteToHostException) {
                 Log.w(TAG, "No route to host $host: Ensure device is on the same local Wi-Fi subnet")
-                _connectionState.value = ConnectionState.Error("No route to $host (Check Wi-Fi)")
-                disconnect()
+                failOrFallback(isAlreadyPaired, "No route to $host (Check Wi-Fi)")
             } catch (e: java.net.UnknownHostException) {
                 Log.w(TAG, "Unknown host: $host")
-                _connectionState.value = ConnectionState.Error("Unknown host $host")
-                disconnect()
+                failOrFallback(isAlreadyPaired, "Unknown host $host")
             } catch (e: Exception) {
                 Log.w(TAG, "Connection to $host:$port failed: ${e.message}")
                 _connectionState.value = ConnectionState.Error(e.message ?: "Connection failed")
@@ -295,6 +329,15 @@ class TlsSocketEngine(private val context: Context) {
                     isPlaying = isPlaying
                 )
             }
+            ProtocolTypes.ADDRESSES -> saveOverlayAddresses(json)
+            ProtocolTypes.SCREEN_FRAME -> {
+                val bytes = Base64.decode(json.optString("jpegBase64"), Base64.DEFAULT)
+                _screenFrame.value = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: _screenFrame.value
+            }
+            ProtocolTypes.SCREEN_STOPPED -> {
+                _screenFrame.value = null
+                _notices.tryEmit("The screen stopped: " + json.optString("reason", "the computer ended it"))
+            }
             ProtocolTypes.PROXIMITY_HEARTBEAT -> {
                 val sentTs = json.optLong("clientTimestamp", 0L)
                 if (sentTs > 0) {
@@ -396,6 +439,54 @@ class TlsSocketEngine(private val context: Context) {
             put("button", button)
         }
         sendJson(msg)
+    }
+
+    // Remote desktop: watch the screen (the computer must have allowed it for this phone), and point, scroll and type on it.
+    fun startScreen(maxWidth: Int = 1024, fps: Int = 2) {
+        sendJson(JSONObject().apply {
+            put("type", ProtocolTypes.SCREEN_START)
+            put("maxWidth", maxWidth)
+            put("fps", fps)
+        })
+    }
+
+    fun stopScreen() {
+        sendJson(JSONObject().apply { put("type", ProtocolTypes.SCREEN_STOP) })
+        _screenFrame.value = null
+    }
+
+    /** [x] and [y] are fractions (0 to 1) of the picture's width and height. */
+    fun sendInputMoveTo(x: Float, y: Float) {
+        sendJson(JSONObject().apply {
+            put("type", ProtocolTypes.INPUT_EVENT)
+            put("action", "MOVE_TO")
+            put("x", x.toDouble())
+            put("y", y.toDouble())
+        })
+    }
+
+    fun sendInputScroll(lines: Int) {
+        sendJson(JSONObject().apply {
+            put("type", ProtocolTypes.INPUT_EVENT)
+            put("action", "SCROLL")
+            put("lines", lines)
+        })
+    }
+
+    fun sendInputType(text: String) {
+        sendJson(JSONObject().apply {
+            put("type", ProtocolTypes.INPUT_EVENT)
+            put("action", "TYPE")
+            put("text", text)
+        })
+    }
+
+    fun sendInputKey(key: String) {
+        sendJson(JSONObject().apply {
+            put("type", ProtocolTypes.INPUT_EVENT)
+            put("action", "KEY")
+            put("key", key)
+        })
     }
 
     fun sendLockDesktop() {
@@ -532,6 +623,7 @@ class TlsSocketEngine(private val context: Context) {
         socket = null
         reader = null
         writer = null
+        _screenFrame.value = null
         _connectionState.value = ConnectionState.Disconnected
     }
 

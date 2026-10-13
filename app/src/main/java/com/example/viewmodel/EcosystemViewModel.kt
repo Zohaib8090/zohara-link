@@ -467,6 +467,14 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         socketEngine.sendInputClick(button)
     }
 
+    val screenFrame get() = socketEngine.screenFrame
+    fun startScreen() = socketEngine.startScreen()
+    fun stopScreen() = socketEngine.stopScreen()
+    fun sendInputMoveTo(x: Float, y: Float) = socketEngine.sendInputMoveTo(x, y)
+    fun sendInputScroll(lines: Int) = socketEngine.sendInputScroll(lines)
+    fun sendInputType(text: String) = socketEngine.sendInputType(text)
+    fun sendInputKey(key: String) = socketEngine.sendInputKey(key)
+
     fun sendLockDesktop() {
         socketEngine.sendLockDesktop()
     }

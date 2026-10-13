@@ -33,6 +33,22 @@ The Android changes are **not compiled or run yet** (no Android toolchain in the
   at most 4 at once, and a transfer that sends more than it declared is cancelled and its partial file deleted.
 * Notification text from the phone is stripped of control characters and cut to a sane length.
 
+## Away from home and remote desktop (2026-10-13, alpha)
+
+* **Away from home:** no new port and no new way in. The daemon already listens on every address; `remote.rs` only finds this
+  computer's addresses on overlay networks (Tailscale, ZeroTier, NetBird, WireGuard, by interface name or the 100.64.0.0/10 range)
+  and tells an authenticated phone about them (`ADDRESSES`). A phone that cannot reach the saved address tries them one by one.
+  Over an overlay the phone still needs the pinned certificate and its token; pairing still has to be opened on the computer and the
+  PIN typed there. A phone must have been paired once (at home, on the same network) before it can use this route.
+* **Watching the screen is its own permission** (`allow_screen`, off by default, `SET_PERMISSION` with `screen`), separate from the
+  mouse. It is checked for every frame: switching it off, unpairing or a dropped connection ends the stream at once. Controlling
+  the computer from the remote desktop (click, scroll, type, a fixed list of keys) needs the mouse permission too, so a phone with
+  only "Show the screen" cannot touch anything. Typed text is cut to 200 characters and stripped of control characters; keys are a
+  fixed list, not free key names.
+* The screen picture shows everything on the computer, including a password typed there. The same TLS connection protects it as
+  everything else; there is no extra "blank the screen" mode yet.
+* `ZOHARA_LINK_SCREEN_CMD` (environment of the daemon, not of a phone) swaps the capture tool; tests use it.
+
 ## Notifications, media and files (2026-10-12)
 
 * Phone notifications are filtered on the phone (ongoing, progress, media, service and group-summary ones are never sent; identical
@@ -57,6 +73,8 @@ The Android changes are **not compiled or run yet** (no Android toolchain in the
 * The pinned fingerprint and token live in the app's private storage, not in the Android Keystore; a rooted phone can read them.
 * The daemon listens on all interfaces; only the pairing/auth rules above stop a stranger, not a firewall. Zohara does not ship
   a firewall rule for port 42424.
+* Remote desktop and the overlay route have only been tested against the real daemon with a faked screen and no real Tailscale; never
+  on a real Plasma screen or phone.
 * Remote input and file receiving trust the paired phone completely once allowed.
 * Never tested on a phone yet: the Android pinning, token reconnect, the new PIN dialog, notification filtering, file transfer, the
   self-update. CI builds the app; nobody has run it.

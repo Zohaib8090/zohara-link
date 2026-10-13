@@ -1,5 +1,5 @@
 use crate::protocol::{FileTransfer, PairedDevice};
-use crate::{auth, desktop, limits, mdns, tls};
+use crate::{auth, desktop, limits, mdns, remote, screen, tls};
 use anyhow::{Context, Result};
 use rand::Rng;
 use serde_json::{json, Value};
@@ -28,7 +28,7 @@ pub struct Daemon {
     /// SHA-256 of this daemon's TLS certificate: what phones pin and what the pairing notification shows.
     fingerprint: String,
 
-    paired_devices: TokioMutex<HashMap<String, PairedDevice>>,
+    paired_devices: Arc<TokioMutex<HashMap<String, PairedDevice>>>,
     /// PIN waiting for each device id, with its tries and age (see `auth::PendingPin`).
     pending_pairings: TokioMutex<HashMap<String, auth::PendingPin>>,
     /// Connections (keyed by the connection-scoped "dev_<ip>_<port>" id)
@@ -59,6 +59,8 @@ pub struct Daemon {
     /// Fan-out to local Unix-socket IPC clients (Waybar, a GTK settings
     /// panel, `zohara-link-status`, ...).
     ipc_broadcast: broadcast::Sender<String>,
+    /// Running screen streams, one per connection, so they end with the connection or when the permission is taken away.
+    screen_streams: TokioMutex<HashMap<String, tokio::task::JoinHandle<()>>>,
 }
 
 impl Daemon {
@@ -96,7 +98,7 @@ impl Daemon {
             paired_devices_file,
             downloads_dir,
             unix_socket_path,
-            paired_devices: TokioMutex::new(paired_devices),
+            paired_devices: Arc::new(TokioMutex::new(paired_devices)),
             pending_pairings: TokioMutex::new(HashMap::new()),
             authenticated_connections: TokioMutex::new(HashMap::new()),
             active_connections: TokioMutex::new(HashMap::new()),
@@ -106,6 +108,7 @@ impl Daemon {
             last_media: TokioMutex::new(None),
             notify_gate: std::sync::Mutex::new(limits::NotifyGate::default()),
             ipc_broadcast,
+            screen_streams: TokioMutex::new(HashMap::new()),
         }))
     }
 
@@ -241,6 +244,7 @@ impl Daemon {
 
         log::info!("Connection closed for {peer}");
         self.drop_transfers_of(&device_id).await;
+        self.stop_screen(&device_id).await;
         self.active_connections.lock().await.remove(&device_id);
         self.authenticated_connections.lock().await.remove(&device_id);
     }
@@ -288,6 +292,8 @@ impl Daemon {
                     let _ = send_json(writer, &json!({"type": "ERROR", "error": "remote input is not allowed for this phone"})).await;
                 }
             }
+            "SCREEN_START" => self.handle_screen_start(device_id, &packet, writer).await,
+            "SCREEN_STOP" => self.stop_screen(device_id).await,
             "MEDIA_CONTROL" => {
                 let action = packet.get("action").and_then(Value::as_str).unwrap_or("").to_string();
                 // Talking to the player can take a moment: never on the thread that serves the connection.
@@ -414,6 +420,7 @@ impl Daemon {
                 last_ip,
                 token_hash: auth::token_hash(&token),
                 allow_input: false,
+                allow_screen: false,
             };
             self.paired_devices
                 .lock()
@@ -438,6 +445,7 @@ impl Daemon {
                 }),
             )
             .await;
+            self.send_addresses(writer).await;
             self.broadcast_local_ipc("DEVICE_PAIRED", public_device(&paired)).await;
         } else {
             let error = if outcome == auth::PinCheck::Expired {
@@ -470,6 +478,7 @@ impl Daemon {
             self.save_paired_devices().await;
             self.broadcast_local_ipc("DEVICE_CONNECTED", json!({"deviceId": req_device_id})).await;
             let _ = send_json(writer, &json!({"type": "AUTH_RESULT", "status": "SUCCESS", "serverName": hostname()})).await;
+            self.send_addresses(writer).await;
             if let Some(m) = self.last_media.lock().await.clone() {
                 let _ = send_json(writer, &m).await;
             }
@@ -478,6 +487,91 @@ impl Daemon {
             // A short pause makes guessing a token from the network pointless.
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             let _ = send_json(writer, &json!({"type": "AUTH_RESULT", "status": "FAILED", "error": "not paired or token wrong"})).await;
+        }
+    }
+
+    /// Tells a phone every overlay address (Tailscale and the like) this computer can be reached at, so it can come back through
+    /// them when the home network is not shared.
+    async fn send_addresses(&self, writer: &SharedWriter) {
+        let port = self.port;
+        let status = tokio::task::spawn_blocking(move || remote::status_json(port)).await.unwrap_or_else(|_| json!({}));
+        let _ = send_json(
+            writer,
+            &json!({"type": "ADDRESSES", "serverName": hostname(), "port": port, "overlays": status["overlays"]}),
+        )
+        .await;
+    }
+
+    fn paired_devices_handle(&self) -> Arc<TokioMutex<HashMap<String, PairedDevice>>> {
+        self.paired_devices.clone()
+    }
+
+    async fn device_of(&self, connection: &str) -> String {
+        self.authenticated_connections.lock().await.get(connection).cloned().unwrap_or_default()
+    }
+
+    async fn handle_screen_start(&self, connection: &str, packet: &Value, writer: &SharedWriter) {
+        let dev = self.device_of(connection).await;
+        if !self.paired_devices.lock().await.get(&dev).map(|d| d.allow_screen).unwrap_or(false) {
+            let _ = send_json(writer, &json!({"type": "ERROR", "error": "viewing the screen is not allowed for this phone"})).await;
+            return;
+        }
+        let (max_width, fps) = screen::clamp_request(
+            packet.get("maxWidth").and_then(Value::as_u64).unwrap_or(1024),
+            packet.get("fps").and_then(Value::as_u64).unwrap_or(2),
+        );
+        self.stop_screen(connection).await;
+        let (this_conn, writer, daemon_dev) = (connection.to_string(), writer.clone(), dev);
+        let paired = self.paired_devices_handle();
+        let handle = tokio::spawn(async move {
+            let mut seq: u64 = 0;
+            let mut last_hash = String::new();
+            let tick = std::time::Duration::from_millis(1000 / fps as u64);
+            loop {
+                let started = Instant::now();
+                // Permission is checked for every frame: taking it away in Settings ends the stream at once.
+                if !paired.lock().await.get(&daemon_dev).map(|d| d.allow_screen).unwrap_or(false) {
+                    let _ = send_json(&writer, &json!({"type": "SCREEN_STOPPED", "reason": "not allowed"})).await;
+                    break;
+                }
+                let frame = tokio::task::spawn_blocking(move || screen::capture().and_then(|b| screen::shrink_to_jpeg(&b, max_width, 60))).await.ok().flatten();
+                match frame {
+                    Some(f) => {
+                        let hash = auth::fingerprint(&f.jpeg);
+                        if hash != last_hash {
+                            last_hash = hash;
+                            seq += 1;
+                            use base64::Engine;
+                            let packet = json!({"type": "SCREEN_FRAME", "seq": seq, "width": f.width, "height": f.height,
+                                "screenWidth": f.source_width, "screenHeight": f.source_height,
+                                "jpegBase64": base64::engine::general_purpose::STANDARD.encode(&f.jpeg)});
+                            if send_json(&writer, &packet).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    None => {
+                        let _ = send_json(&writer, &json!({"type": "SCREEN_STOPPED", "reason": "the computer could not take a picture of the screen (no Spectacle, grim or maim)"})).await;
+                        break;
+                    }
+                }
+                tokio::time::sleep(tick.saturating_sub(started.elapsed())).await;
+            }
+            log::info!("screen stream of {this_conn} ended");
+        });
+        self.screen_streams.lock().await.insert(connection.to_string(), handle);
+    }
+
+    async fn stop_screen(&self, connection: &str) {
+        if let Some(h) = self.screen_streams.lock().await.remove(connection) {
+            h.abort();
+        }
+    }
+
+    async fn stop_screen_of_device(&self, device: &str) {
+        let conns: Vec<String> = self.authenticated_connections.lock().await.iter().filter(|(_, d)| d.as_str() == device).map(|(c, _)| c.clone()).collect();
+        for c in conns {
+            self.stop_screen(&c).await;
         }
     }
 
@@ -719,11 +813,17 @@ impl Daemon {
             Some("SET_PERMISSION") => {
                 let id = req.get("deviceId").and_then(Value::as_str).unwrap_or("");
                 let input = req.get("input").and_then(Value::as_bool);
+                let screen = req.get("screen").and_then(Value::as_bool);
                 let found = {
                     let mut devices = self.paired_devices.lock().await;
-                    match (devices.get_mut(id), input) {
-                        (Some(d), Some(v)) => {
-                            d.allow_input = v;
+                    match devices.get_mut(id) {
+                        Some(d) if input.is_some() || screen.is_some() => {
+                            if let Some(v) = input {
+                                d.allow_input = v;
+                            }
+                            if let Some(v) = screen {
+                                d.allow_screen = v;
+                            }
                             true
                         }
                         _ => false,
@@ -731,10 +831,21 @@ impl Daemon {
                 };
                 if found {
                     self.save_paired_devices().await;
+                    if screen == Some(false) {
+                        self.stop_screen_of_device(id).await;
+                    }
                     json!({"status": "OK"})
                 } else {
                     json!({"status": "NOT_FOUND"})
                 }
+            }
+            Some("GET_REMOTE") => {
+                let port = self.port;
+                tokio::task::spawn_blocking(move || remote::status_json(port)).await.unwrap_or_else(|_| json!({}))
+            }
+            Some("REMOTE_LOGIN") => {
+                let url = tokio::task::spawn_blocking(remote::tailscale_login).await.ok().flatten();
+                json!({"status": if url.is_some() { "OK" } else { "NO_LINK" }, "loginUrl": url.unwrap_or_default()})
             }
             Some("UNPAIR") => {
                 let id = req.get("deviceId").and_then(Value::as_str).unwrap_or("");
@@ -742,6 +853,7 @@ impl Daemon {
                 if removed {
                     self.save_paired_devices().await;
                     // Whatever is connected as that device loses access at once.
+                    self.stop_screen_of_device(id).await;
                     self.authenticated_connections.lock().await.retain(|_, dev| dev != id);
                     self.broadcast_local_ipc("DEVICE_UNPAIRED", json!({"deviceId": id})).await;
                 }
@@ -865,6 +977,14 @@ fn handle_input_event(packet: &Value) {
             let button = packet.get("button").and_then(Value::as_str).unwrap_or("LEFT");
             desktop::simulate_pointer_click(button);
         }
+        // Remote desktop: place the pointer on a spot of the shown screen, scroll, type, press a listed key.
+        Some("MOVE_TO") => {
+            let f = |k: &str| packet.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+            desktop::pointer_move_to(f("x"), f("y"));
+        }
+        Some("SCROLL") => desktop::pointer_scroll(packet.get("lines").and_then(Value::as_i64).unwrap_or(0)),
+        Some("TYPE") => desktop::type_text(packet.get("text").and_then(Value::as_str).unwrap_or("")),
+        Some("KEY") => desktop::press_key(packet.get("key").and_then(Value::as_str).unwrap_or("")),
         // Locking the screen is a form of remote control, so it needs the same permission as the mouse.
         Some("LOCK_SCREEN") => desktop::trigger_screen_lock(),
         _ => {}

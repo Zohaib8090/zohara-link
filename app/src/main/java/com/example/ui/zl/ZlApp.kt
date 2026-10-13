@@ -179,6 +179,7 @@ fun ZlApp(vm: EcosystemViewModel) {
                 vm.disconnect()
                 ZlScreen.FIND
             }
+            ZlScreen.DESKTOP -> ZlScreen.REMOTE
             else -> ZlScreen.HOME
         }
     }
@@ -225,6 +226,21 @@ fun ZlApp(vm: EcosystemViewModel) {
                     onConfirm = { pin -> lastError = null; vm.confirmPairing(pin) },
                     onCancel = { vm.disconnect(); screen = ZlScreen.FIND },
                 )
+                ZlScreen.DESKTOP -> {
+                    val frame by vm.screenFrame.collectAsStateWithLifecycle()
+                    DesktopScreen(
+                        computerName = computerName,
+                        connected = connected,
+                        frame = frame,
+                        onStart = { vm.startScreen() },
+                        onStop = { vm.stopScreen() },
+                        onTap = { x, y, right -> vm.sendInputMoveTo(x, y); vm.sendInputClick(if (right) "RIGHT" else "LEFT") },
+                        onScroll = { vm.sendInputScroll(it) },
+                        onType = { vm.sendInputType(it) },
+                        onKey = { vm.sendInputKey(it) },
+                        onBack = { screen = ZlScreen.REMOTE },
+                    )
+                }
                 else -> Scaffold(
                     containerColor = Zl.bg,
                     bottomBar = { ZlBottomBar(current = screen, onGo = { screen = it }) },
@@ -269,6 +285,7 @@ fun ZlApp(vm: EcosystemViewModel) {
                                 onMove = { dx, dy -> vm.sendInputMove(dx, dy) },
                                 onClick = { vm.sendInputClick(it) },
                                 onMedia = { vm.sendMediaAction(it) },
+                                onDesktop = { screen = ZlScreen.DESKTOP },
                             )
                             else -> AccessScreen(
                                 computerName = computerName,

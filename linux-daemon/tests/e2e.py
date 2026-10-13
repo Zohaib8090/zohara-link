@@ -12,7 +12,10 @@ ctx=ssl.create_default_context(); ctx.check_hostname=False; ctx.verify_mode=ssl.
 def conn():
     s=ctx.wrap_socket(socket.create_connection(('127.0.0.1',42999),5)); s.settimeout(20); return s,s.makefile('rw')
 def send(f,o): f.write(json.dumps(o)+'\n'); f.flush()
-def rd(f): return json.loads(f.readline())
+def rd(f):
+    while True:
+        p=json.loads(f.readline())
+        if p.get('type')!='ADDRESSES': return p
 ok=True
 def check(n,c):
     global ok; print(('PASS ' if c else 'FAIL ')+n); ok&=bool(c)

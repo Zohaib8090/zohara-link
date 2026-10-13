@@ -27,6 +27,11 @@ object ProtocolTypes {
     const val VOLUME_CONTROL = "VOLUME_CONTROL"
     const val INPUT_EVENT = "INPUT_EVENT"
     const val PROXIMITY_HEARTBEAT = "PROXIMITY_HEARTBEAT"
+    const val ADDRESSES = "ADDRESSES"
+    const val SCREEN_START = "SCREEN_START"
+    const val SCREEN_STOP = "SCREEN_STOP"
+    const val SCREEN_FRAME = "SCREEN_FRAME"
+    const val SCREEN_STOPPED = "SCREEN_STOPPED"
 }
 
 data class DiscoveredDevice(

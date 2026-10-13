@@ -323,6 +323,7 @@ fun RemoteScreen(
     onMove: (Float, Float) -> Unit,
     onClick: (String) -> Unit,
     onMedia: (String) -> Unit,
+    onDesktop: () -> Unit,
 ) {
     Column(
         Page
@@ -377,6 +378,7 @@ fun RemoteScreen(
             SecondaryButton("Left click", Modifier.weight(1f)) { onClick("LEFT") }
             SecondaryButton("Right click", Modifier.weight(1f)) { onClick("RIGHT") }
         }
+        SecondaryButton("See and control the computer's screen", Modifier.fillMaxWidth()) { onDesktop() }
 
         ZlCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

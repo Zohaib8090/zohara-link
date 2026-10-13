@@ -53,6 +53,7 @@ for i in range(5):
     call({'command':'OPEN_PAIRING'})
 send(f,{'type':'FILE_OFFER','transferId':'after','fileName':'after.bin','fileSize':10})
 r=json.loads(f.readline())
+while r.get('type')=='ADDRESSES': r=json.loads(f.readline())  # unasked packet after pairing
 check('after 5 cut-off transfers a new offer is still accepted', r.get('accepted') is True)
 check('no half-finished transfer is left behind', call({'command':'GET_STATUS'})['active_transfers']==[])
 check('the cut-off partial files were deleted', not any(n.startswith('cut') for n in os.listdir(dl)))

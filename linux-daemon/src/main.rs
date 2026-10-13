@@ -16,6 +16,8 @@ mod limits;
 mod desktop;
 mod mdns;
 mod protocol;
+mod remote;
+mod screen;
 mod tls;
 
 use clap::Parser;

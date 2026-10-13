@@ -57,7 +57,7 @@ object Zl {
     val bar = Color(0xFF0F141C)
 }
 
-enum class ZlScreen { WELCOME, FIND, PAIR, HOME, FILES, REMOTE, ACCESS }
+enum class ZlScreen { WELCOME, FIND, PAIR, HOME, FILES, REMOTE, DESKTOP, ACCESS }
 
 @Composable
 fun ZlTheme(content: @Composable () -> Unit) {

@@ -97,6 +97,58 @@ fn pointer_click_now(button: &str) {
     with_pointer_tool(&["click", ydotool_code], &["click", xdotool_btn]);
 }
 
+/// Puts the pointer at a place on the screen given as fractions (0.0 to 1.0) of its width and height.
+pub fn pointer_move_to(fx: f64, fy: f64) {
+    let Some((w, h)) = crate::screen::last_size() else { return };
+    let (x, y) = absolute_position(fx, fy, w, h);
+    let (xs, ys) = (x.to_string(), y.to_string());
+    with_pointer_tool(&["mousemove", "--absolute", "-x", &xs, "-y", &ys], &["mousemove", &xs, &ys]);
+}
+
+pub fn absolute_position(fx: f64, fy: f64, w: u32, h: u32) -> (i64, i64) {
+    let c = |f: f64| if f.is_finite() { f.clamp(0.0, 1.0) } else { 0.0 };
+    ((c(fx) * (w.saturating_sub(1)) as f64).round() as i64, (c(fy) * (h.saturating_sub(1)) as f64).round() as i64)
+}
+
+/// Scrolls: positive `lines` scrolls down.
+pub fn pointer_scroll(lines: i64) {
+    let lines = lines.clamp(-20, 20);
+    if lines == 0 {
+        return;
+    }
+    let n = lines.unsigned_abs().to_string();
+    let signed = (-lines).to_string();
+    let btn = if lines > 0 { "5" } else { "4" };
+    with_pointer_tool(&["mousemove", "--wheel", "-x", "0", "-y", &signed], &["click", "--repeat", &n, btn]);
+}
+
+/// Types text as if on the keyboard. Control characters are dropped and the length is capped.
+pub fn type_text(text: &str) {
+    let clean: String = text.chars().filter(|c| !c.is_control()).take(200).collect();
+    if clean.is_empty() {
+        return;
+    }
+    with_pointer_tool(&["type", "--", &clean], &["type", "--", &clean]);
+}
+
+/// A small fixed list of keys, not arbitrary key names: (name, Linux key code, xdotool name).
+const KEYS: &[(&str, u32, &str)] = &[
+    ("ENTER", 28, "Return"), ("BACKSPACE", 14, "BackSpace"), ("TAB", 15, "Tab"), ("ESCAPE", 1, "Escape"),
+    ("DELETE", 111, "Delete"), ("UP", 103, "Up"), ("DOWN", 108, "Down"), ("LEFT", 105, "Left"), ("RIGHT", 106, "Right"),
+    ("HOME", 102, "Home"), ("END", 107, "End"), ("PAGE_UP", 104, "Prior"), ("PAGE_DOWN", 109, "Next"),
+];
+
+pub fn key_known(name: &str) -> bool {
+    KEYS.iter().any(|k| k.0 == name)
+}
+
+pub fn press_key(name: &str) {
+    if let Some((_, code, xname)) = KEYS.iter().find(|k| k.0 == name) {
+        let (down, up) = (format!("{code}:1"), format!("{code}:0"));
+        with_pointer_tool(&["key", &down, &up], &["key", xname]);
+    }
+}
+
 /// One thing to do to the pointer. Phones send a burst of tiny moves; running a tool for each one made the pointer lag more and
 /// more behind the finger, so moves are queued and merged: whatever piled up while the last one ran becomes one move.
 #[derive(Debug, Clone, PartialEq)]
@@ -317,6 +369,21 @@ mod tests {
             merge_ops(ops),
             vec![PointerOp::Move(4.0, 1.0), PointerOp::Click("LEFT".into()), PointerOp::Move(6.0, 6.0)]
         );
+    }
+
+    #[test]
+    fn fractions_become_pixels_inside_the_screen() {
+        assert_eq!(absolute_position(0.0, 0.0, 1920, 1080), (0, 0));
+        assert_eq!(absolute_position(1.0, 1.0, 1920, 1080), (1919, 1079));
+        assert_eq!(absolute_position(0.5, 0.5, 1001, 501), (500, 250));
+        assert_eq!(absolute_position(-3.0, f64::NAN, 100, 100), (0, 0));
+        assert_eq!(absolute_position(9.0, 9.0, 100, 100), (99, 99));
+    }
+
+    #[test]
+    fn only_listed_keys_are_known() {
+        assert!(key_known("ENTER") && key_known("PAGE_DOWN"));
+        assert!(!key_known("ctrl+alt+Delete") && !key_known(""));
     }
 
     #[test]
