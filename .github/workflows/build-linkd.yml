@@ -30,7 +30,7 @@ jobs:
       - name: Install Arch build dependencies
         run: |
           pacman -Syu --noconfirm
-          pacman -S --noconfirm --needed base-devel git rust sudo github-cli
+          pacman -S --noconfirm --needed base-devel git rust sudo github-cli gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly
           useradd -m builder || true
           echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
 

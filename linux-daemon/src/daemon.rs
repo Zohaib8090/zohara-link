@@ -61,6 +61,28 @@ pub struct Daemon {
     ipc_broadcast: broadcast::Sender<String>,
     /// Running screen streams, one per connection, so they end with the connection or when the permission is taken away.
     screen_streams: TokioMutex<HashMap<String, tokio::task::JoinHandle<()>>>,
+    /// Live game streams (the `zohara-linkd-stream` program), one per connection. See docs/STREAMING.md.
+    live_streams: TokioMutex<HashMap<String, LiveStream>>,
+}
+
+/// The stream program of one connection: where commands are written, and the task that owns the process and reads what it says.
+struct LiveStream {
+    stdin: Arc<TokioMutex<tokio::process::ChildStdin>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+/// Where the stream program is: next to the daemon, or `ZOHARA_LINK_STREAM_BIN`, or on the PATH.
+fn stream_program() -> std::ffi::OsString {
+    if let Some(p) = std::env::var_os("ZOHARA_LINK_STREAM_BIN") {
+        return p;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let sibling = exe.with_file_name("zohara-linkd-stream");
+        if sibling.exists() {
+            return sibling.into_os_string();
+        }
+    }
+    "zohara-linkd-stream".into()
 }
 
 impl Daemon {
@@ -109,6 +131,7 @@ impl Daemon {
             notify_gate: std::sync::Mutex::new(limits::NotifyGate::default()),
             ipc_broadcast,
             screen_streams: TokioMutex::new(HashMap::new()),
+            live_streams: TokioMutex::new(HashMap::new()),
         }))
     }
 
@@ -245,6 +268,7 @@ impl Daemon {
         log::info!("Connection closed for {peer}");
         self.drop_transfers_of(&device_id).await;
         self.stop_screen(&device_id).await;
+        self.stop_live_stream(&device_id).await;
         // a phone that vanished while holding a key, a button or the controller must not leave them stuck down
         uinput::release_all();
         self.active_connections.lock().await.remove(&device_id);
@@ -295,6 +319,17 @@ impl Daemon {
                 }
             }
             "SCREEN_START" => self.handle_screen_start(device_id, &packet, writer).await,
+            "STREAM_START" => self.handle_stream_start(device_id, &packet, writer).await,
+            "STREAM_ANSWER" => {
+                let sdp = packet.get("sdp").and_then(Value::as_str).unwrap_or("");
+                self.stream_command(device_id, json!({"cmd": "answer", "sdp": limits::clean_text(sdp, 100_000)})).await;
+            }
+            "STREAM_ICE" => {
+                let candidate = packet.get("candidate").and_then(Value::as_str).unwrap_or("");
+                let mline = packet.get("mline").and_then(Value::as_u64).unwrap_or(0);
+                self.stream_command(device_id, json!({"cmd": "ice", "mline": mline, "candidate": limits::clean_text(candidate, 2000)})).await;
+            }
+            "STREAM_STOP" => self.stop_live_stream(device_id).await,
             "SCREEN_STOP" => self.stop_screen(device_id).await,
             "MEDIA_CONTROL" => {
                 let action = packet.get("action").and_then(Value::as_str).unwrap_or("").to_string();
@@ -569,6 +604,89 @@ impl Daemon {
         self.screen_streams.lock().await.insert(connection.to_string(), handle);
     }
 
+    /// A phone asks for the live stream (video, and its input back over WebRTC). Needs the same permission as seeing the screen.
+    async fn handle_stream_start(&self, connection: &str, packet: &Value, writer: &SharedWriter) {
+        use tokio::io::AsyncWriteExt as _;
+        let dev = self.device_of(connection).await;
+        if !self.paired_devices.lock().await.get(&dev).map(|d| d.allow_screen).unwrap_or(false) {
+            let _ = send_json(writer, &json!({"type": "ERROR", "error": "viewing the screen is not allowed for this phone"})).await;
+            return;
+        }
+        self.stop_live_stream(connection).await;
+        let n = |k: &str, d: u64| packet.get(k).and_then(Value::as_u64).unwrap_or(d);
+        // a test picture only when the test switch is set in the environment; a phone cannot ask for it
+        let source = if std::env::var_os("ZOHARA_LINK_STREAM_TEST").is_some() { "test" } else { "screen" };
+        let start = json!({"cmd": "start", "source": source, "width": n("width", 1280), "height": n("height", 720), "fps": n("fps", 60), "bitrate": n("bitrate", 8000)});
+        let mut child = match tokio::process::Command::new(stream_program())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::inherit())
+            .kill_on_drop(true)
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) => {
+                log::warn!("the stream program could not be started: {e}");
+                let _ = send_json(writer, &json!({"type": "STREAM_ERROR", "error": "Game streaming is not installed on the computer yet. Open Settings > Zohara Link there and press Set up game streaming."})).await;
+                return;
+            }
+        };
+        let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else { return };
+        if stdin.write_all(format!("{start}\n").as_bytes()).await.is_err() {
+            return;
+        }
+        let stdin = Arc::new(TokioMutex::new(stdin));
+        let (writer, paired, dev2, conn) = (writer.clone(), self.paired_devices_handle(), dev, connection.to_string());
+        let task = tokio::spawn(async move {
+            let _child = child; // dropped (and killed) when this task ends or is aborted
+            let mut lines = BufReader::new(stdout).lines();
+            let mut heard = false;
+            while let Ok(Some(line)) = lines.next_line().await {
+                let Ok(v) = serde_json::from_str::<Value>(&line) else { continue };
+                heard = true;
+                let reply = match v.get("event").and_then(Value::as_str) {
+                    Some("offer") => json!({"type": "STREAM_OFFER", "sdp": v["sdp"]}),
+                    Some("ice") => json!({"type": "STREAM_ICE", "mline": v["mline"], "candidate": v["candidate"]}),
+                    Some("state") => json!({"type": "STREAM_STATE", "state": v["state"]}),
+                    Some("error") => json!({"type": "STREAM_ERROR", "error": v["message"]}),
+                    Some("input") => {
+                        // Controlling the computer needs its own permission, checked for every message.
+                        if paired.lock().await.get(&dev2).map(|d| d.allow_input).unwrap_or(false) {
+                            handle_input_event(&v["data"]);
+                        }
+                        continue;
+                    }
+                    _ => continue,
+                };
+                if send_json(&writer, &reply).await.is_err() {
+                    break;
+                }
+            }
+            log::info!("game stream of {conn} ended");
+            if !heard {
+                // it stopped without a word: GStreamer's libraries are missing, or the program crashed at once
+                let _ = send_json(&writer, &json!({"type": "STREAM_ERROR", "error": "Game streaming is not installed on the computer yet. Open Settings > Zohara Link there and press Set up game streaming."})).await;
+            }
+            let _ = send_json(&writer, &json!({"type": "STREAM_STATE", "state": "closed"})).await;
+        });
+        self.live_streams.lock().await.insert(connection.to_string(), LiveStream { stdin, task });
+    }
+
+    /// Sends a command to the stream program of this connection (an answer or a candidate from the phone).
+    async fn stream_command(&self, connection: &str, cmd: Value) {
+        use tokio::io::AsyncWriteExt as _;
+        let stdin = self.live_streams.lock().await.get(connection).map(|s| s.stdin.clone());
+        if let Some(stdin) = stdin {
+            let _ = stdin.lock().await.write_all(format!("{cmd}\n").as_bytes()).await;
+        }
+    }
+
+    async fn stop_live_stream(&self, connection: &str) {
+        if let Some(s) = self.live_streams.lock().await.remove(connection) {
+            s.task.abort();
+        }
+    }
+
     async fn stop_screen(&self, connection: &str) {
         if let Some(h) = self.screen_streams.lock().await.remove(connection) {
             h.abort();
@@ -579,6 +697,7 @@ impl Daemon {
         let conns: Vec<String> = self.authenticated_connections.lock().await.iter().filter(|(_, d)| d.as_str() == device).map(|(c, _)| c.clone()).collect();
         for c in conns {
             self.stop_screen(&c).await;
+            self.stop_live_stream(&c).await;
         }
     }
 

@@ -9,11 +9,17 @@ license=('MIT' 'GPL-3.0-or-later')
 # These are what the buttons on the phone run: media keys (playerctl), the clipboard (wl-clipboard), the pointer (ydotool) and
 # desktop notifications (libnotify). All are in the Arch repositories and the ISO already has them; listing them here makes an
 # update install them on machines that do not.
-depends=('gcc-libs' 'playerctl' 'wl-clipboard' 'ydotool' 'libnotify' 'spectacle')
+# gstreamer and the two -libs packages are what the live stream program (zohara-linkd-stream) links to; the plugins it needs at
+# run time are installed by the "Set up game streaming" button in Settings (they are large), see docs/STREAMING.md.
+depends=('gcc-libs' 'playerctl' 'wl-clipboard' 'ydotool' 'libnotify' 'spectacle' 'gstreamer' 'gst-plugins-base-libs' 'gst-plugins-bad-libs')
 makedepends=('cargo')
 optdepends=(
   'xclip: clipboard sync on X11'
   'xdotool: remote pointer control on X11'
+  'gst-plugins-bad: game streaming (WebRTC)'
+  'gst-plugin-pipewire: game streaming (screen capture)'
+  'gst-plugin-va: game streaming (Intel/AMD hardware video encoder)'
+  'gst-plugins-ugly: game streaming (software video encoder, last resort)'
   'hyprlock: proximity screen lock (Hyprland)'
   'swaylock: proximity screen lock (sway)'
 )
@@ -34,6 +40,7 @@ build() {
 
 package() {
   install -Dm755 "$startdir/target/release/zohara-linkd" "$pkgdir/usr/bin/zohara-linkd"
+  install -Dm755 "$startdir/target/release/zohara-linkd-stream" "$pkgdir/usr/bin/zohara-linkd-stream"
   install -Dm755 "$startdir/target/release/zohara-link-status" "$pkgdir/usr/bin/zohara-link-status"
   install -Dm644 "$startdir/zohara-linkd.service" "$pkgdir/usr/lib/systemd/user/zohara-linkd.service"
 }
