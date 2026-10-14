@@ -313,6 +313,19 @@ fn nvidia_awake() -> bool {
 }
 
 fn main() {
+    // `zohara-linkd-stream --grant-screen`: ask the desktop once for permission to share the screen (Settings runs this).
+    if std::env::args().any(|a| a == "--grant-screen") {
+        match acquire_screen() {
+            Ok(_) => {
+                println!("Screen sharing is allowed.");
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+    }
     let out = Arc::new(Mutex::new(std::io::stdout()));
     let sink: Sink = {
         let out = out.clone();
