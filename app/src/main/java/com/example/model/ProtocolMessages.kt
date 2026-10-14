@@ -32,6 +32,13 @@ object ProtocolTypes {
     const val SCREEN_STOP = "SCREEN_STOP"
     const val SCREEN_FRAME = "SCREEN_FRAME"
     const val SCREEN_STOPPED = "SCREEN_STOPPED"
+    const val STREAM_START = "STREAM_START"
+    const val STREAM_STOP = "STREAM_STOP"
+    const val STREAM_OFFER = "STREAM_OFFER"
+    const val STREAM_ANSWER = "STREAM_ANSWER"
+    const val STREAM_ICE = "STREAM_ICE"
+    const val STREAM_STATE = "STREAM_STATE"
+    const val STREAM_ERROR = "STREAM_ERROR"
 }
 
 data class DiscoveredDevice(

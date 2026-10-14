@@ -76,6 +76,13 @@ class TlsSocketEngine(private val context: Context) {
     val activeTransfers: StateFlow<Map<String, Int>> = _activeTransfers.asStateFlow()
 
     /** The computer's screen, newest picture (null when not watching). Shown by the remote desktop screen. */
+    /** The live game stream's signalling from the computer (offer, candidates, state, errors); see GameStreamClient. */
+    private val _streamMessages = kotlinx.coroutines.flow.MutableSharedFlow<JSONObject>(extraBufferCapacity = 128)
+    val streamMessages: kotlinx.coroutines.flow.SharedFlow<JSONObject> = _streamMessages
+
+    /** Sends a message as it is (the stream's answer and candidates). */
+    fun sendRaw(o: JSONObject) = sendJson(o)
+
     private val _screenFrame = MutableStateFlow<Bitmap?>(null)
     val screenFrame: StateFlow<Bitmap?> = _screenFrame.asStateFlow()
 
@@ -339,6 +346,9 @@ class TlsSocketEngine(private val context: Context) {
                 val bytes = Base64.decode(json.optString("jpegBase64"), Base64.DEFAULT)
                 _screenFrame.value = BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: _screenFrame.value
                 _screenProblem.value = null
+            }
+            ProtocolTypes.STREAM_OFFER, ProtocolTypes.STREAM_ICE, ProtocolTypes.STREAM_STATE, ProtocolTypes.STREAM_ERROR -> {
+                _streamMessages.tryEmit(json)
             }
             ProtocolTypes.SCREEN_STOPPED -> {
                 _screenFrame.value = null

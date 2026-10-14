@@ -44,6 +44,8 @@ googleid = "1.1.1"
 
 
 [libraries]
+# Google's WebRTC for Android (maintained build): the phone side of the live game stream
+stream-webrtc-android = { group = "io.getstream", name = "stream-webrtc-android", version = "1.3.10" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }

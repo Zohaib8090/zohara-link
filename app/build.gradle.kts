@@ -101,6 +101,7 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation(libs.stream.webrtc.android)
   // implementation(libs.coil.compose)
   // Uncomment to use Firestore:
   // implementation(libs.firebase.firestore)

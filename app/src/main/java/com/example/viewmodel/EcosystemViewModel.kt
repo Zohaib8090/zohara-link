@@ -474,6 +474,9 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         socketEngine.sendInputClick(button)
     }
 
+    val streamMessages get() = socketEngine.streamMessages
+    fun sendRaw(o: org.json.JSONObject) = socketEngine.sendRaw(o)
+
     val screenFrame get() = socketEngine.screenFrame
     val screenProblem get() = socketEngine.screenProblem
     fun startScreen() = socketEngine.startScreen()

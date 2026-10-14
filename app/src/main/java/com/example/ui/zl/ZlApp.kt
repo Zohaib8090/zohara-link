@@ -69,6 +69,13 @@ fun ZlApp(vm: EcosystemViewModel) {
     var lastError by remember { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
 
+    // The live game stream (WebRTC): made once, fed with the computer's signalling for as long as the app is open.
+    val streamClient = remember { com.example.network.GameStreamClient(context.applicationContext) { vm.sendRaw(it) } }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        vm.streamMessages.collect { streamClient.onSignal(it) }
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { streamClient.release() } }
+
     // The app's own update (see AppUpdater): look once when the app opens, and again when the person asks.
     val installedBuild = remember { AppUpdater.installed(context) }
     var update by remember { mutableStateOf<UpdateInfo?>(null) }
@@ -247,6 +254,31 @@ fun ZlApp(vm: EcosystemViewModel) {
                         onBack = { screen = ZlScreen.REMOTE },
                     )
                 }
+                ZlScreen.STREAM -> GameStreamScreen(
+                    client = streamClient,
+                    computerName = computerName,
+                    connected = connected,
+                    fps = 60,
+                    bitrateKbps = 10000,
+                    onGamepadState = { b, lx, ly, rx, ry, lt, rt, hx, hy ->
+                        // the fast way when the stream's data channel is open, else the normal connection
+                        val body = org.json.JSONObject().apply {
+                            put("action", "GAMEPAD"); put("buttons", b)
+                            put("lx", lx.toDouble()); put("ly", ly.toDouble()); put("rx", rx.toDouble()); put("ry", ry.toDouble())
+                            put("lt", lt.toDouble()); put("rt", rt.toDouble()); put("hatX", hx); put("hatY", hy)
+                        }
+                        if (!streamClient.sendInput(body)) vm.sendGamepad(b, lx, ly, rx, ry, lt, rt, hx, hy)
+                    },
+                    onGamepadOff = { vm.sendGamepadOff() },
+                    onMove = { dx, dy ->
+                        val body = org.json.JSONObject().apply { put("action", "MOVE"); put("dx", dx.toDouble()); put("dy", dy.toDouble()) }
+                        if (!streamClient.sendInput(body)) vm.sendInputMove(dx, dy)
+                    },
+                    onClick = { vm.sendInputClick(it) },
+                    onButton = { b, down -> vm.sendInputButton(b, down) },
+                    onScroll = { dx, dy -> vm.sendInputScrollSmooth(dx, dy) },
+                    onClose = { screen = ZlScreen.REMOTE },
+                )
                 ZlScreen.GAMEPAD -> GamepadScreen(
                     computerName = computerName,
                     connected = connected,
@@ -300,6 +332,7 @@ fun ZlApp(vm: EcosystemViewModel) {
                                 onButton = { b, down -> vm.sendInputButton(b, down) },
                                 onScroll = { dx, dy -> vm.sendInputScrollSmooth(dx, dy) },
                                 onGamepad = { screen = ZlScreen.GAMEPAD },
+                                onStream = { screen = ZlScreen.STREAM },
                                 onMedia = { vm.sendMediaAction(it) },
                                 onDesktop = { screen = ZlScreen.DESKTOP },
                             )

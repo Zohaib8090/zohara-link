@@ -325,6 +325,7 @@ fun RemoteScreen(
     onButton: (String, Boolean) -> Unit,
     onScroll: (Float, Float) -> Unit,
     onGamepad: () -> Unit,
+    onStream: () -> Unit,
     onMedia: (String) -> Unit,
     onDesktop: () -> Unit,
 ) {
@@ -380,7 +381,8 @@ fun RemoteScreen(
             SecondaryButton("Right click", Modifier.weight(1f)) { onClick("RIGHT") }
         }
         SecondaryButton("See and control the computer's screen", Modifier.fillMaxWidth()) { onDesktop() }
-        SecondaryButton("Use the phone as a game controller", Modifier.fillMaxWidth()) { onGamepad() }
+        SecondaryButton("Play: live video with a game controller", Modifier.fillMaxWidth()) { onStream() }
+        SecondaryButton("Use the phone as a game controller only", Modifier.fillMaxWidth()) { onGamepad() }
 
         ZlCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

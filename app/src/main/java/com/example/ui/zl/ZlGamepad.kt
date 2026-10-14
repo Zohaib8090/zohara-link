@@ -90,6 +90,21 @@ fun GamepadScreen(
         }
     }
 
+    GamepadControls(Modifier.background(Zl.bg), computerName, connected, onState, onClose)
+}
+
+/**
+ * The controller's buttons and sticks, without a background, so they can sit on top of the live video (set a transparent
+ * [modifier]) or on the plain controller screen. [onState] is called when something changed, at most about 60 times a second.
+ */
+@Composable
+fun GamepadControls(
+    modifier: Modifier,
+    computerName: String,
+    connected: Boolean,
+    onState: (buttons: Int, lx: Float, ly: Float, rx: Float, ry: Float, lt: Float, rt: Float, hatX: Int, hatY: Int) -> Unit,
+    onClose: () -> Unit,
+) {
     var buttons by remember { mutableIntStateOf(0) }
     var lx by remember { mutableFloatStateOf(0f) }
     var ly by remember { mutableFloatStateOf(0f) }
@@ -117,7 +132,7 @@ fun GamepadScreen(
         buttons = if (on) buttons or bit else buttons and bit.inv()
     }
 
-    Box(Modifier.fillMaxSize().background(Zl.bg)) {
+    Box(modifier.fillMaxSize()) {
         // top row: close, status, bumpers and triggers
         Row(Modifier.align(Alignment.TopCenter).padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
