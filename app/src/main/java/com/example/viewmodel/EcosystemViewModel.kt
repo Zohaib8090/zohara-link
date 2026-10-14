@@ -463,6 +463,13 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
         socketEngine.sendInputMove(dx, dy)
     }
 
+    fun sendInputButton(button: String, down: Boolean) = socketEngine.sendInputButton(button, down)
+    fun sendInputScrollSmooth(dx: Float, dy: Float) = socketEngine.sendInputScrollSmooth(dx, dy)
+    fun sendInputKeyCode(code: Int, down: Boolean) = socketEngine.sendInputKeyCode(code, down)
+    fun sendGamepad(buttons: Int, lx: Float, ly: Float, rx: Float, ry: Float, lt: Float, rt: Float, hatX: Int, hatY: Int) =
+        socketEngine.sendGamepad(buttons, lx, ly, rx, ry, lt, rt, hatX, hatY)
+    fun sendGamepadOff() = socketEngine.sendGamepadOff()
+
     fun sendInputClick(button: String = "LEFT") {
         socketEngine.sendInputClick(button)
     }

@@ -322,6 +322,9 @@ fun RemoteScreen(
     media: MediaControlState,
     onMove: (Float, Float) -> Unit,
     onClick: (String) -> Unit,
+    onButton: (String, Boolean) -> Unit,
+    onScroll: (Float, Float) -> Unit,
+    onGamepad: () -> Unit,
     onMedia: (String) -> Unit,
     onDesktop: () -> Unit,
 ) {
@@ -350,28 +353,26 @@ fun RemoteScreen(
         )
 
         val pad = RoundedCornerShape(28.dp)
-        Column(
-            Modifier
+        Touchpad(
+            modifier = Modifier
                 .fillMaxWidth()
                 .height(292.dp)
                 .clip(pad)
                 .background(Zl.card)
                 .border(1.dp, Zl.line, pad)
-                .semantics { contentDescription = "Touchpad. Drag a finger to move the pointer, tap to click." }
-                .pointerInput(Unit) {
-                    detectDragGestures { change, drag ->
-                        change.consume()
-                        onMove(drag.x * 1.6f, drag.y * 1.6f)
-                    }
-                }
-                .pointerInput(Unit) { detectTapGestures(onTap = { onClick("LEFT") }) },
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
+                .semantics { contentDescription = "Touchpad. Drag a finger to move the pointer, tap to click, two fingers to scroll." },
+            onMove = onMove,
+            onClick = onClick,
+            onButton = onButton,
+            onScroll = onScroll,
         ) {
-            Icon(Icons.Filled.Mouse, contentDescription = null, tint = androidx.compose.ui.graphics.Color(0xFF3A4A5E), modifier = Modifier.size(36.dp))
-            Spacer(Modifier.height(10.dp))
-            Text("Drag to move the pointer", color = Zl.muted, fontSize = 14.sp)
-            Text("Tap to click", color = Zl.muted, fontSize = 12.5.sp)
+            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(Icons.Filled.Mouse, contentDescription = null, tint = androidx.compose.ui.graphics.Color(0xFF3A4A5E), modifier = Modifier.size(36.dp))
+                Spacer(Modifier.height(10.dp))
+                Text("Drag to move the pointer", color = Zl.muted, fontSize = 14.sp)
+                Text("Tap to click · two fingers: right-click and scroll", color = Zl.muted, fontSize = 12.5.sp)
+                Text("Tap, then touch and drag: hold the button", color = Zl.muted, fontSize = 12.5.sp)
+            }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -379,6 +380,7 @@ fun RemoteScreen(
             SecondaryButton("Right click", Modifier.weight(1f)) { onClick("RIGHT") }
         }
         SecondaryButton("See and control the computer's screen", Modifier.fillMaxWidth()) { onDesktop() }
+        SecondaryButton("Use the phone as a game controller", Modifier.fillMaxWidth()) { onGamepad() }
 
         ZlCard {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

@@ -240,9 +240,20 @@ fun ZlApp(vm: EcosystemViewModel) {
                         onScroll = { vm.sendInputScroll(it) },
                         onType = { vm.sendInputType(it) },
                         onKey = { vm.sendInputKey(it) },
+                        onMove = { dx, dy -> vm.sendInputMove(dx, dy) },
+                        onClick = { vm.sendInputClick(it) },
+                        onButton = { b, down -> vm.sendInputButton(b, down) },
+                        onScrollSmooth = { dx, dy -> vm.sendInputScrollSmooth(dx, dy) },
                         onBack = { screen = ZlScreen.REMOTE },
                     )
                 }
+                ZlScreen.GAMEPAD -> GamepadScreen(
+                    computerName = computerName,
+                    connected = connected,
+                    onState = { b, lx, ly, rx, ry, lt, rt, hx, hy -> vm.sendGamepad(b, lx, ly, rx, ry, lt, rt, hx, hy) },
+                    onOff = { vm.sendGamepadOff() },
+                    onClose = { screen = ZlScreen.REMOTE },
+                )
                 else -> Scaffold(
                     containerColor = Zl.bg,
                     bottomBar = { ZlBottomBar(current = screen, onGo = { screen = it }) },
@@ -286,6 +297,9 @@ fun ZlApp(vm: EcosystemViewModel) {
                                 media = media,
                                 onMove = { dx, dy -> vm.sendInputMove(dx, dy) },
                                 onClick = { vm.sendInputClick(it) },
+                                onButton = { b, down -> vm.sendInputButton(b, down) },
+                                onScroll = { dx, dy -> vm.sendInputScrollSmooth(dx, dy) },
+                                onGamepad = { screen = ZlScreen.GAMEPAD },
                                 onMedia = { vm.sendMediaAction(it) },
                                 onDesktop = { screen = ZlScreen.DESKTOP },
                             )

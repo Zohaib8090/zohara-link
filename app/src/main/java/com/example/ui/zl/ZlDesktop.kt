@@ -57,6 +57,10 @@ fun DesktopScreen(
     onScroll: (Int) -> Unit,
     onType: (String) -> Unit,
     onKey: (String) -> Unit,
+    onMove: (Float, Float) -> Unit,
+    onClick: (String) -> Unit,
+    onButton: (String, Boolean) -> Unit,
+    onScrollSmooth: (Float, Float) -> Unit,
     onBack: () -> Unit,
 ) {
     // Watch while this screen is open and the computer is connected; stop the moment either stops being true.
@@ -65,6 +69,12 @@ fun DesktopScreen(
         onDispose { onStop() }
     }
     var text by remember { mutableStateOf("") }
+    var full by remember { mutableStateOf(false) }
+
+    if (full) {
+        FullScreenDesktop(frame, connected, problem, onMove, onClick, onButton, onScrollSmooth, onKey, onTap) { full = false }
+        return
+    }
 
     Column(
         Modifier
@@ -77,7 +87,10 @@ fun DesktopScreen(
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(computerName, color = Zl.text, fontSize = 18.sp, maxLines = 1)
-            SecondaryButton("Close") { onBack() }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SecondaryButton("Full screen") { full = true }
+                SecondaryButton("Close") { onBack() }
+            }
         }
 
         val shape = RoundedCornerShape(14.dp)
@@ -143,4 +156,92 @@ fun DesktopScreen(
             SecondaryButton("▶", Modifier.weight(1f)) { onKey("RIGHT") }
         }
     }
+}
+
+/**
+ * The whole phone screen is the computer's screen: the phone turns sideways, the bars go away, and the screen is shown as large as
+ * it fits. Two ways to control it, switched at the top: **Touchpad** (the whole screen is a touchpad: move, tap, two fingers
+ * scroll, tap-and-drag to hold the button) and **Touch** (tap where you want to click, like a touch screen).
+ * The picture is a few frames a second, not a video: good for controlling the desktop, not for watching or playing on it.
+ */
+@Composable
+private fun FullScreenDesktop(
+    frame: Bitmap?,
+    connected: Boolean,
+    problem: String?,
+    onMove: (Float, Float) -> Unit,
+    onClick: (String) -> Unit,
+    onButton: (String, Boolean) -> Unit,
+    onScroll: (Float, Float) -> Unit,
+    onKey: (String) -> Unit,
+    onTap: (Float, Float, Boolean) -> Unit,
+    onExit: () -> Unit,
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    DisposableEffect(Unit) {
+        var c: android.content.Context = context
+        var activity: android.app.Activity? = null
+        while (activity == null && c is android.content.ContextWrapper) {
+            if (c is android.app.Activity) activity = c else c = c.baseContext
+        }
+        val before = activity?.requestedOrientation ?: android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        activity?.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        val window = activity?.window
+        val controller = window?.let { androidx.core.view.WindowCompat.getInsetsController(it, it.decorView) }
+        controller?.systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller?.hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        onDispose {
+            controller?.show(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+            activity?.requestedOrientation = before
+        }
+    }
+    var touchMode by remember { mutableStateOf(false) }
+
+    Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black)) {
+        if (frame == null) {
+            Text(
+                if (!connected) "Not connected to the computer." else problem ?: "Waiting for the computer's screen…",
+                color = Zl.muted, fontSize = 14.sp, modifier = Modifier.align(Alignment.Center).padding(24.dp),
+            )
+        } else {
+            Image(
+                bitmap = frame.asImageBitmap(),
+                contentDescription = "The computer's screen",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        if (touchMode) {
+            // tap where to click: the picture fills the phone's screen width or height, so positions are fractions of what is shown
+            Box(
+                Modifier.fillMaxSize().pointerInput(frame?.width, frame?.height) {
+                    detectTapGestures(
+                        onTap = { o -> fractionOf(o.x, o.y, size.width, size.height, frame)?.let { (x, y) -> onTap(x, y, false) } },
+                        onLongPress = { o -> fractionOf(o.x, o.y, size.width, size.height, frame)?.let { (x, y) -> onTap(x, y, true) } },
+                    )
+                },
+            ) {}
+        } else {
+            Touchpad(Modifier.fillMaxSize(), onMove = onMove, onClick = onClick, onButton = onButton, onScroll = onScroll)
+        }
+        Row(
+            Modifier.align(Alignment.TopCenter).padding(top = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SecondaryButton(if (touchMode) "Use as touchpad" else "Use as touch screen") { touchMode = !touchMode }
+            SecondaryButton("Esc") { onKey("ESCAPE") }
+            SecondaryButton("Exit full screen") { onExit() }
+        }
+    }
+}
+
+/** Where a touch at ([px], [py]) is on the computer's screen, as fractions 0..1, when the picture is shown as large as fits. Null: outside the picture. */
+internal fun fractionOf(px: Float, py: Float, viewW: Int, viewH: Int, frame: Bitmap?): Pair<Float, Float>? {
+    if (frame == null || viewW <= 0 || viewH <= 0) return null
+    val scale = minOf(viewW.toFloat() / frame.width, viewH.toFloat() / frame.height)
+    val w = frame.width * scale
+    val h = frame.height * scale
+    val x = (px - (viewW - w) / 2f) / w
+    val y = (py - (viewH - h) / 2f) / h
+    return if (x in 0f..1f && y in 0f..1f) x to y else null
 }

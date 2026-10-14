@@ -420,7 +420,8 @@ class TlsSocketEngine(private val context: Context) {
         if (moveJob?.isActive == true) return
         moveJob = scope.launch {
             while (isActive) {
-                delay(16)
+                // the computer writes a move in microseconds now, so moves can go out about 120 times a second
+                delay(8)
                 val (x, y) = synchronized(moveLock) {
                     val taken = pendingDx to pendingDy
                     pendingDx = 0f
@@ -436,6 +437,59 @@ class TlsSocketEngine(private val context: Context) {
                 })
             }
         }
+    }
+
+    /** Holds a mouse button down or lets it go (dragging). */
+    fun sendInputButton(button: String, down: Boolean) {
+        sendJson(JSONObject().apply {
+            put("type", ProtocolTypes.INPUT_EVENT)
+            put("action", "BUTTON")
+            put("button", button)
+            put("down", down)
+        })
+    }
+
+    /** Smooth scrolling in lines (fractions allowed): positive scrolls down and right. */
+    fun sendInputScrollSmooth(dx: Float, dy: Float) {
+        sendJson(JSONObject().apply {
+            put("type", ProtocolTypes.INPUT_EVENT)
+            put("action", "SCROLL")
+            put("dx", dx.toDouble())
+            put("dy", dy.toDouble())
+        })
+    }
+
+    /** A key held down or let go, by its Linux key code. */
+    fun sendInputKeyCode(code: Int, down: Boolean) {
+        sendJson(JSONObject().apply {
+            put("type", ProtocolTypes.INPUT_EVENT)
+            put("action", if (down) "KEY_DOWN" else "KEY_UP")
+            put("code", code)
+        })
+    }
+
+    /** The phone as a game controller: its whole state. Sticks -1..1 (up is negative), triggers 0..1, buttons as a bit mask. */
+    fun sendGamepad(buttons: Int, lx: Float, ly: Float, rx: Float, ry: Float, lt: Float, rt: Float, hatX: Int, hatY: Int) {
+        sendJson(JSONObject().apply {
+            put("type", ProtocolTypes.INPUT_EVENT)
+            put("action", "GAMEPAD")
+            put("buttons", buttons)
+            put("lx", lx.toDouble())
+            put("ly", ly.toDouble())
+            put("rx", rx.toDouble())
+            put("ry", ry.toDouble())
+            put("lt", lt.toDouble())
+            put("rt", rt.toDouble())
+            put("hatX", hatX)
+            put("hatY", hatY)
+        })
+    }
+
+    fun sendGamepadOff() {
+        sendJson(JSONObject().apply {
+            put("type", ProtocolTypes.INPUT_EVENT)
+            put("action", "GAMEPAD_OFF")
+        })
     }
 
     fun sendInputClick(button: String = "LEFT") {
