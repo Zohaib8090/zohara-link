@@ -58,3 +58,17 @@ See the end of this file; it is updated with every step.
   nvh264enc encodes on the laptop), video on a real phone, latency. Those need the GStreamer plugins on the laptop and the phone client.
 * Package: `zohara-linkd` now installs the stream program and depends on `gstreamer`, `gst-plugins-base-libs`, `gst-plugins-bad-libs`;
   the plugins are optional and installed by Settings.
+
+### 2026-10-15 (later): phases 2 and 3 built
+* **Settings** (`zohara-settings`, Zohara Link page > Game streaming): "Set up game streaming" installs `gst-plugins-base/good/bad/ugly`,
+  `gst-plugin-pipewire`, `gst-plugin-va` (password prompt, existing package lists, no `-Sy`); "Allow screen sharing" runs
+  `zohara-linkd-stream --grant-screen`. **The portal flow was run on the owner's laptop and worked**: the desktop asked, the owner pressed
+  Share, the token was kept in `~/.config/zohara-link/screencast-token`.
+* **Phone app** (build 111): `network/GameStreamClient.kt` (libwebrtc from `io.getstream:stream-webrtc-android` 1.3.10; answers the offer,
+  hardware decoder, data channel "input"), `ui/zl/ZlGameStream.kt` (full-screen video, sideways, controller or touchpad on top),
+  `GamepadControls` split out of the controller screen. It compiles in CI; **it has never run on a phone**. The APK is 59 MB
+  (the WebRTC library), debug-signed.
+* Not yet seen working end to end: real screen -> encoder -> phone. The laptop still lacks the GStreamer plugins (needs the Set up button,
+  which needs the owner's password), and nobody has opened the stream on a phone. Latency has not been measured.
+* Next: run the first real stream (laptop plugins installed, phone with build 111), then fix what shows up; then sound (Opus), adaptive
+  bitrate, 120 fps, on-screen latency readout, a quality picker in the app.
