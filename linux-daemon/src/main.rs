@@ -19,6 +19,7 @@ mod protocol;
 mod remote;
 mod screen;
 mod tls;
+mod uinput;
 
 use clap::Parser;
 

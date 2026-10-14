@@ -138,6 +138,11 @@ const KEYS: &[(&str, u32, &str)] = &[
     ("HOME", 102, "Home"), ("END", 107, "End"), ("PAGE_UP", 104, "Prior"), ("PAGE_DOWN", 109, "Next"),
 ];
 
+/// The Linux key code of a listed key name.
+pub fn key_code(name: &str) -> Option<u32> {
+    KEYS.iter().find(|k| k.0 == name).map(|k| k.1)
+}
+
 pub fn key_known(name: &str) -> bool {
     KEYS.iter().any(|k| k.0 == name)
 }

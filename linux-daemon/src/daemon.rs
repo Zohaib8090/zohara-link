@@ -1,5 +1,5 @@
 use crate::protocol::{FileTransfer, PairedDevice};
-use crate::{auth, desktop, limits, mdns, remote, screen, tls};
+use crate::{auth, desktop, limits, mdns, remote, screen, tls, uinput};
 use anyhow::{Context, Result};
 use rand::Rng;
 use serde_json::{json, Value};
@@ -245,6 +245,8 @@ impl Daemon {
         log::info!("Connection closed for {peer}");
         self.drop_transfers_of(&device_id).await;
         self.stop_screen(&device_id).await;
+        // a phone that vanished while holding a key, a button or the controller must not leave them stuck down
+        uinput::release_all();
         self.active_connections.lock().await.remove(&device_id);
         self.authenticated_connections.lock().await.remove(&device_id);
     }
@@ -972,24 +974,61 @@ fn restrict_to_owner(path: &std::path::Path, mode: u32) {
 }
 
 fn handle_input_event(packet: &Value) {
+    let f = |k: &str| packet.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+    // Smooth path first: events written straight to a virtual device. The old tools are the fallback when /dev/uinput
+    // cannot be opened (no permission yet) so nothing stops working.
     match packet.get("action").and_then(Value::as_str) {
         Some("MOVE") => {
-            let dx = packet.get("dx").and_then(Value::as_f64).unwrap_or(0.0);
-            let dy = packet.get("dy").and_then(Value::as_f64).unwrap_or(0.0);
-            desktop::simulate_pointer_move(dx, dy);
+            let (dx, dy) = (f("dx"), f("dy"));
+            if uinput::mouse_move(dx, dy).is_none() {
+                desktop::simulate_pointer_move(dx, dy);
+            }
         }
         Some("CLICK") => {
             let button = packet.get("button").and_then(Value::as_str).unwrap_or("LEFT");
-            desktop::simulate_pointer_click(button);
+            if uinput::mouse_click(button).is_none() {
+                desktop::simulate_pointer_click(button);
+            }
+        }
+        // Hold a button down and let it go again (dragging, and games).
+        Some("BUTTON") => {
+            let button = packet.get("button").and_then(Value::as_str).unwrap_or("LEFT");
+            let down = packet.get("down").and_then(Value::as_bool).unwrap_or(false);
+            let _ = uinput::mouse_button(button, down);
         }
         // Remote desktop: place the pointer on a spot of the shown screen, scroll, type, press a listed key.
         Some("MOVE_TO") => {
-            let f = |k: &str| packet.get(k).and_then(Value::as_f64).unwrap_or(0.0);
-            desktop::pointer_move_to(f("x"), f("y"));
+            if uinput::pointer_to(f("x"), f("y")).is_none() {
+                desktop::pointer_move_to(f("x"), f("y"));
+            }
         }
-        Some("SCROLL") => desktop::pointer_scroll(packet.get("lines").and_then(Value::as_i64).unwrap_or(0)),
+        Some("SCROLL") => {
+            // `lines` (whole numbers, the old way) or `dy` / `dx` in lines with fractions for a smooth drag
+            let dy = packet.get("dy").and_then(Value::as_f64).unwrap_or_else(|| packet.get("lines").and_then(Value::as_f64).unwrap_or(0.0));
+            if uinput::mouse_scroll(dy, f("dx")).is_none() {
+                desktop::pointer_scroll(dy.round() as i64);
+            }
+        }
         Some("TYPE") => desktop::type_text(packet.get("text").and_then(Value::as_str).unwrap_or("")),
-        Some("KEY") => desktop::press_key(packet.get("key").and_then(Value::as_str).unwrap_or("")),
+        Some("KEY") => {
+            let name = packet.get("key").and_then(Value::as_str).unwrap_or("");
+            match desktop::key_code(name) {
+                Some(code) if uinput::key_tap(code).is_some() => {}
+                _ => desktop::press_key(name),
+            }
+        }
+        // A key held down or let go by its Linux code (games, shortcuts like Ctrl+C from a phone keyboard bar).
+        Some("KEY_DOWN") | Some("KEY_UP") => {
+            let down = packet.get("action").and_then(Value::as_str) == Some("KEY_DOWN");
+            if let Some(code) = packet.get("code").and_then(Value::as_u64) {
+                let _ = uinput::key(code as u32, down);
+            }
+        }
+        // The phone as a game controller: its whole state, about sixty times a second while it is used.
+        Some("GAMEPAD") => {
+            let _ = uinput::gamepad(uinput::PadState::from_packet(packet));
+        }
+        Some("GAMEPAD_OFF") => uinput::gamepad_off(),
         // Locking the screen is a form of remote control, so it needs the same permission as the mouse.
         Some("LOCK_SCREEN") => desktop::trigger_screen_lock(),
         _ => {}
