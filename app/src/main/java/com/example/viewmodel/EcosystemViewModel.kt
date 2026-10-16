@@ -247,9 +247,10 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
     val notices get() = socketEngine.notices
 
     /** A file the computer wants to send to this phone (null when none), and the person's answer. */
-    val incomingOffer get() = socketEngine.incomingOffer
+    val incomingOffers get() = socketEngine.incomingOffers
     val receiveProgress get() = socketEngine.receiveProgress
     fun answerFileOffer(accept: Boolean) = socketEngine.answerFileOffer(accept)
+    fun answerAllFileOffers(accept: Boolean) = socketEngine.answerAllFileOffers(accept)
 
     fun computerCode(): String = socketEngine.computerCode()
 

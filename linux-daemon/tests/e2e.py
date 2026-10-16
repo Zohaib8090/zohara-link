@@ -15,7 +15,7 @@ def send(f,o): f.write(json.dumps(o)+'\n'); f.flush()
 def rd(f):
     while True:
         p=json.loads(f.readline())
-        if p.get('type')!='ADDRESSES': return p
+        if p.get('type') not in ('ADDRESSES','MEDIA_CONTROL'): return p
 ok=True
 def check(n,c):
     global ok; print(('PASS ' if c else 'FAIL ')+n); ok&=bool(c)
@@ -108,6 +108,42 @@ try:
     r=call({'command':'SEND_FILE','deviceId':'phone1','path':src}); o3=rd(f)
     send(f,{'type':'FILE_PUSH_CANCEL','transferId':o3['transferId']})
     check('phone can cancel an offer',next_event('FILE_SEND_CANCELLED')['transferId']==o3['transferId'])
+    # a folder is zipped and offered as <name>.zip; the temporary zip is deleted when the transfer ends
+    fold=W+'/My Folder'; os.makedirs(fold+'/sub/deeper'); open(fold+'/a.txt','w').write('alpha'); open(fold+'/sub/b.bin','wb').write(os.urandom(70000)); open(fold+'/sub/deeper/c.txt','w').write('gamma')
+    os.symlink('/etc/passwd',fold+'/link-to-passwd')
+    r=call({'command':'SEND_FILE','deviceId':'phone1','path':fold}); check('folder offered',r['status']=='OFFERED')
+    o=rd(f); check('folder arrives as a zip with its name',o['type']=='FILE_PUSH_OFFER' and o['fileName']=='My Folder.zip' and o['fileSize']>0)
+    tmpdir=H+'/.cache/zohara-link/outgoing'
+    check('a temporary zip exists while offered',len(os.listdir(tmpdir))==1)
+    send(f,{'type':'FILE_PUSH_ACCEPT','transferId':o['transferId'],'accepted':True})
+    zdata=b''
+    while True:
+        m=rd(f)
+        if m['type']=='FILE_PUSH_CHUNK': zdata+=base64.b64decode(m['payloadBase64'])
+        elif m['type']=='FILE_PUSH_COMPLETE': break
+    import zipfile, io
+    zf=zipfile.ZipFile(io.BytesIO(zdata)); names=sorted(zf.namelist())
+    check('zip holds the folder, its subfolders and files',names==['My Folder/','My Folder/a.txt','My Folder/sub/','My Folder/sub/b.bin','My Folder/sub/deeper/','My Folder/sub/deeper/c.txt'])
+    check('zip contents are right',zf.read('My Folder/a.txt')==b'alpha' and zf.read('My Folder/sub/deeper/c.txt')==b'gamma' and zf.testzip() is None)
+    check('links are not followed into the zip','My Folder/link-to-passwd' not in names)
+    time.sleep(.5); check('temporary zip deleted after the transfer',os.listdir(tmpdir)==[])
+    # a declined folder also leaves nothing behind
+    r=call({'command':'SEND_FILE','deviceId':'phone1','path':fold}); o=rd(f)
+    send(f,{'type':'FILE_PUSH_ACCEPT','transferId':o['transferId'],'accepted':False}); next_event('FILE_SEND_DECLINED'); time.sleep(.3)
+    check('declined folder leaves no temporary zip',os.listdir(tmpdir)==[])
+    # several offers at once all reach the phone (a multi-file choice)
+    ids=[]
+    for i in range(6): call({'command':'SEND_FILE','deviceId':'phone1','path':src}); ids.append(rd(f)['transferId'])
+    check('six offers at once are all made',len(set(ids))==6)
+    for i in ids: send(f,{'type':'FILE_PUSH_CANCEL','transferId':i})
+    time.sleep(.3)
+    # the clipboard option is off until chosen, and is kept
+    check('clipboard files option off by default',call({'command':'GET_STATUS'})['clipboard_files'] is False)
+    check('turn the option on',call({'command':'SET_OPTION','clipboardFiles':True})['status']=='OK')
+    check('option is on in the status',call({'command':'GET_STATUS'})['clipboard_files'] is True)
+    check('option is saved on disk','true' in open(cfg+'/options.json').read())
+    check('turn the option off again',call({'command':'SET_OPTION','clipboardFiles':False})['status']=='OK')
+    check('unknown option refused',call({'command':'SET_OPTION','bogus':1})['status']=='UNKNOWN_OPTION')
     # a line that never ends is cut off, not buffered
     s9,f9=conn(); s9.sendall(b'a'*(300*1024)); time.sleep(.5)
     try: dead = (s9.recv(10)==b'')

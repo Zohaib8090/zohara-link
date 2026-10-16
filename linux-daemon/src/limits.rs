@@ -17,6 +17,8 @@ pub const MAX_UNAUTHENTICATED: usize = 8;
 /// Largest file the phone may send, and how many transfers may run at once.
 pub const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 pub const MAX_TRANSFERS: usize = 4;
+/// Files offered to phones and not yet answered or finished (a folder of many files, or a copy of several files at once).
+pub const MAX_OFFERS: usize = 32;
 
 /// Reads one `\n`-terminated line of at most `max` bytes. `Ok(None)` is a clean end of stream; a longer line is an error
 /// (the caller drops the connection) instead of growing the buffer.

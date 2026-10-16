@@ -409,3 +409,107 @@ mod tests {
         assert_eq!(parse_playback_status("junk"), "");
     }
 }
+
+
+/// What is on the clipboard besides text: files and folders that were copied (a file manager's "Copy"), or a picture.
+#[derive(Debug, PartialEq)]
+pub enum ClipItems {
+    Files(Vec<std::path::PathBuf>),
+    Image(Vec<u8>),
+}
+
+/// `file:///home/me/My%20Folder` to `/home/me/My Folder`. Other kinds of address are not files and give `None`.
+pub fn file_uri_to_path(uri: &str) -> Option<std::path::PathBuf> {
+    let rest = uri.trim().strip_prefix("file://")?;
+    // file://localhost/path or file:///path
+    let rest = rest.strip_prefix("localhost").unwrap_or(rest);
+    if !rest.starts_with('/') {
+        return None;
+    }
+    let bytes = rest.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).ok().and_then(|h| u8::from_str_radix(h, 16).ok());
+            if let Some(v) = hex {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    Some(std::path::PathBuf::from(String::from_utf8_lossy(&out).into_owned()))
+}
+
+/// The files named in a `text/uri-list` clipboard (comment lines and non-file addresses left out).
+pub fn paths_from_uri_list(list: &str) -> Vec<std::path::PathBuf> {
+    list.lines().filter(|l| !l.starts_with('#')).filter_map(file_uri_to_path).collect()
+}
+
+const MAX_CLIP_IMAGE_BYTES: usize = 30 * 1024 * 1024;
+
+fn clip_targets() -> Vec<String> {
+    let out = if is_wayland() {
+        Command::new("wl-paste").arg("--list-types").output()
+    } else {
+        Command::new("xclip").args(["-selection", "clipboard", "-t", "TARGETS", "-o"]).output()
+    };
+    match out {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).lines().map(|l| l.trim().to_string()).collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn clip_bytes(mime: &str) -> Vec<u8> {
+    let out = if is_wayland() {
+        Command::new("wl-paste").args(["--no-newline", "--type", mime]).output()
+    } else {
+        Command::new("xclip").args(["-selection", "clipboard", "-t", mime, "-o"]).output()
+    };
+    match out {
+        Ok(o) if o.status.success() => o.stdout,
+        _ => Vec::new(),
+    }
+}
+
+/// Files or a picture on the clipboard, if any. Files win over a picture (a file manager also puts a thumbnail there).
+pub fn get_clipboard_items() -> Option<ClipItems> {
+    let targets = clip_targets();
+    if targets.iter().any(|t| t == "text/uri-list") {
+        let paths = paths_from_uri_list(&String::from_utf8_lossy(&clip_bytes("text/uri-list")));
+        if !paths.is_empty() {
+            return Some(ClipItems::Files(paths));
+        }
+    }
+    if targets.iter().any(|t| t == "image/png") {
+        let bytes = clip_bytes("image/png");
+        if !bytes.is_empty() && bytes.len() <= MAX_CLIP_IMAGE_BYTES {
+            return Some(ClipItems::Image(bytes));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod clip_tests {
+    use super::*;
+
+    #[test]
+    fn file_addresses_become_paths() {
+        assert_eq!(file_uri_to_path("file:///home/me/My%20Folder/a%C3%A9.txt").unwrap(), std::path::PathBuf::from("/home/me/My Folder/aé.txt"));
+        assert_eq!(file_uri_to_path("file://localhost/tmp/x").unwrap(), std::path::PathBuf::from("/tmp/x"));
+        assert!(file_uri_to_path("https://example.com/a").is_none());
+        assert!(file_uri_to_path("file://otherhost/tmp/x").is_none());
+        assert_eq!(file_uri_to_path("file:///100%").unwrap(), std::path::PathBuf::from("/100%"));
+    }
+
+    #[test]
+    fn a_uri_list_keeps_only_files() {
+        let list = "# copied\nfile:///a/b.txt\nhttps://x.org/y\nfile:///c%20d\n";
+        let got = paths_from_uri_list(list);
+        assert_eq!(got, vec![std::path::PathBuf::from("/a/b.txt"), std::path::PathBuf::from("/c d")]);
+    }
+}

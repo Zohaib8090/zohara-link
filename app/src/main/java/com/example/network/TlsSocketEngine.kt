@@ -83,8 +83,9 @@ class TlsSocketEngine(private val context: Context) {
     /** A file the computer wants to send to this phone, waiting for the person's yes or no. */
     data class FileOffer(val transferId: String, val name: String, val size: Long)
 
-    private val _incomingOffer = MutableStateFlow<FileOffer?>(null)
-    val incomingOffer: StateFlow<FileOffer?> = _incomingOffer.asStateFlow()
+    /** Offers waiting for an answer, oldest first (a folder, or several files, arrive as several offers). */
+    private val _incomingOffers = MutableStateFlow<List<FileOffer>>(emptyList())
+    val incomingOffers: StateFlow<List<FileOffer>> = _incomingOffers.asStateFlow()
 
     /** Percent of the file being received from the computer, or null when none is. */
     private val _receiveProgress = MutableStateFlow<Int?>(null)
@@ -92,10 +93,10 @@ class TlsSocketEngine(private val context: Context) {
 
     private val receiver = FileReceiver(context)
 
-    /** The person's answer to [incomingOffer]. */
+    /** The person's answer to the first waiting offer. */
     fun answerFileOffer(accept: Boolean) {
-        val offer = _incomingOffer.value ?: return
-        _incomingOffer.value = null
+        val offer = _incomingOffers.value.firstOrNull() ?: return
+        _incomingOffers.value = _incomingOffers.value.drop(1)
         val ok = accept && receiver.begin(offer.transferId, offer.name, offer.size)
         if (accept && !ok) _notices.tryEmit("This file could not be saved on the phone.")
         sendJson(JSONObject().apply {
@@ -105,6 +106,11 @@ class TlsSocketEngine(private val context: Context) {
             if (!ok) put("error", if (accept) "could not save" else "declined")
         })
         if (ok) _receiveProgress.value = 0
+    }
+
+    /** The same answer for every waiting offer ("Accept all" / "Decline all"). */
+    fun answerAllFileOffers(accept: Boolean) {
+        while (_incomingOffers.value.isNotEmpty()) answerFileOffer(accept)
     }
 
     private fun cancelPush(id: String, why: String) {
@@ -119,7 +125,7 @@ class TlsSocketEngine(private val context: Context) {
 
     /** The connection is gone: unanswered offers and half-received files go with it. */
     private fun clearIncomingFiles() {
-        _incomingOffer.value = null
+        _incomingOffers.value = emptyList()
         _receiveProgress.value = null
         receiver.abortAll()
     }
@@ -336,16 +342,18 @@ class TlsSocketEngine(private val context: Context) {
             ProtocolTypes.FILE_PUSH_OFFER -> {
                 val id = json.optString("transferId")
                 if (id.isEmpty()) return
-                // an offer nobody answered is declined by the next one
-                _incomingOffer.value?.let { old ->
+                val offer = FileOffer(id, json.optString("fileName", "file"), json.optLong("fileSize", 0L))
+                // a computer cannot bury the phone: more than this many unanswered offers are declined at once
+                if (_incomingOffers.value.size >= 40) {
                     sendJson(JSONObject().apply {
                         put("type", ProtocolTypes.FILE_PUSH_ACCEPT)
-                        put("transferId", old.transferId)
+                        put("transferId", id)
                         put("accepted", false)
-                        put("error", "declined")
+                        put("error", "too many")
                     })
+                } else {
+                    _incomingOffers.value = _incomingOffers.value + offer
                 }
-                _incomingOffer.value = FileOffer(id, json.optString("fileName", "file"), json.optLong("fileSize", 0L))
             }
             ProtocolTypes.FILE_PUSH_CHUNK -> {
                 val id = json.optString("transferId")

@@ -169,19 +169,28 @@ fun ZlApp(vm: EcosystemViewModel) {
     }
 
     // A file the computer wants to send: nothing is saved until the person says yes.
-    val fileOffer by vm.incomingOffer.collectAsStateWithLifecycle()
+    val fileOffers by vm.incomingOffers.collectAsStateWithLifecycle()
     val receiving by vm.receiveProgress.collectAsStateWithLifecycle()
     LaunchedEffect(receiving == null) {
         if (receiving != null) say("Receiving the file from the computer")
     }
-    fileOffer?.let { o ->
+    fileOffers.firstOrNull()?.let { o ->
+        val more = fileOffers.size - 1
         AlertDialog(
             onDismissRequest = { vm.answerFileOffer(false) },
             containerColor = Zl.card,
-            title = { Text("The computer wants to send you a file", color = Zl.text) },
-            text = { Text("${o.name} (${readableSize(o.size)}). If you accept, it is saved in Downloads/ZoharaLink.", color = Zl.muted) },
-            confirmButton = { TextButton(onClick = { vm.answerFileOffer(true) }) { Text("Accept", color = Zl.accent) } },
-            dismissButton = { TextButton(onClick = { vm.answerFileOffer(false) }) { Text("Decline", color = Zl.muted) } },
+            title = { Text(if (more > 0) "The computer wants to send you ${fileOffers.size} files" else "The computer wants to send you a file", color = Zl.text) },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    Text("${o.name} (${readableSize(o.size)})" + (if (more > 0) " and $more more" else "") + ". If you accept, it is saved in Downloads/ZoharaLink.", color = Zl.muted)
+                    if (more > 0) {
+                        TextButton(onClick = { vm.answerAllFileOffers(true) }) { Text("Accept all ${fileOffers.size}", color = Zl.accent) }
+                        TextButton(onClick = { vm.answerAllFileOffers(false) }) { Text("Decline all", color = Zl.muted) }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { vm.answerFileOffer(true) }) { Text(if (more > 0) "Accept this one" else "Accept", color = Zl.accent) } },
+            dismissButton = { TextButton(onClick = { vm.answerFileOffer(false) }) { Text(if (more > 0) "Decline this one" else "Decline", color = Zl.muted) } },
         )
     }
 

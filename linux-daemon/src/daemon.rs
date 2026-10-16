@@ -21,6 +21,56 @@ struct OutgoingFile {
     path: PathBuf,
     name: String,
     size: u64,
+    /// A file made just for this transfer (a zipped folder, a copied picture): deleted when the transfer ends.
+    temp: bool,
+}
+
+/// Where zipped folders and copied pictures wait while they are offered.
+fn outgoing_temp_dir() -> PathBuf {
+    PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".cache/zohara-link/outgoing")
+}
+
+/// Ends an offer: a file made for it goes away.
+fn forget_outgoing(o: &OutgoingFile) {
+    if o.temp {
+        let _ = std::fs::remove_file(&o.path);
+    }
+}
+
+/// `dir` and everything in it as a zip at `out` (links are skipped, unreadable files are left out). Returns the bytes of the
+/// files put in, or an error when there are more than the size limit allows.
+fn zip_folder(dir: &std::path::Path, out: &std::path::Path) -> std::io::Result<u64> {
+    let root = dir.parent().unwrap_or(dir);
+    let mut zip = zip::ZipWriter::new(std::fs::File::create(out)?);
+    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).large_file(true);
+    let (mut total, mut stack) = (0u64, vec![dir.to_path_buf()]);
+    // the folder itself, so an empty folder still arrives
+    zip.add_directory(format!("{}/", dir.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "folder".into())), options)?;
+    while let Some(d) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&d) else { continue };
+        for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else { continue };
+            let path = entry.path();
+            let name = path.strip_prefix(root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+            if kind.is_symlink() {
+                continue;
+            }
+            if kind.is_dir() {
+                zip.add_directory(format!("{name}/"), options)?;
+                stack.push(path);
+            } else if kind.is_file() {
+                let Ok(mut f) = std::fs::File::open(&path) else { continue };
+                total += f.metadata().map(|m| m.len()).unwrap_or(0);
+                if total > limits::MAX_FILE_BYTES {
+                    return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "too big"));
+                }
+                zip.start_file(name, options)?;
+                std::io::copy(&mut f, &mut zip)?;
+            }
+        }
+    }
+    zip.finish()?;
+    Ok(total)
 }
 
 /// Raw bytes per chunk sent to a phone: about 64 KiB once base64-encoded, well under the 256 KiB line limit.
@@ -65,6 +115,11 @@ pub struct Daemon {
     /// Files the computer is sending to a phone: offered first, streamed only after the phone accepts.
     outgoing_files: Arc<TokioMutex<HashMap<String, OutgoingFile>>>,
     last_clipboard_text: TokioMutex<String>,
+    /// Whether copied files, folders and pictures are offered to phones (Settings switch; off until chosen).
+    clipboard_files: std::sync::atomic::AtomicBool,
+    options_file: PathBuf,
+    /// What was last offered from the clipboard, so one copy is offered once.
+    last_clip_items: TokioMutex<String>,
     /// The last "now playing" state pushed to phones, so a phone that connects later gets it at once.
     last_media: TokioMutex<Option<Value>>,
     /// Drops repeated and flooding phone notifications before they reach the desktop.
@@ -108,6 +163,14 @@ impl Daemon {
         // The folder holds the private key and the list of paired phones: only this user.
         restrict_to_owner(&config_dir, 0o700);
 
+        // zipped folders and copied pictures left behind by a crash
+        let _ = std::fs::remove_dir_all(outgoing_temp_dir());
+        let options_file = config_dir.join("options.json");
+        let clipboard_files = std::fs::read_to_string(&options_file)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .and_then(|v| v.get("clipboard_files").and_then(Value::as_bool))
+            .unwrap_or(false);
         let paired_devices_file = config_dir.join("paired_devices.json");
         let paired_devices = load_paired_devices(&paired_devices_file);
 
@@ -141,6 +204,9 @@ impl Daemon {
             active_file_transfers: TokioMutex::new(HashMap::new()),
             outgoing_files: Arc::new(TokioMutex::new(HashMap::new())),
             last_clipboard_text: TokioMutex::new(String::new()),
+            clipboard_files: std::sync::atomic::AtomicBool::new(clipboard_files),
+            options_file,
+            last_clip_items: TokioMutex::new(String::new()),
             last_media: TokioMutex::new(None),
             notify_gate: std::sync::Mutex::new(limits::NotifyGate::default()),
             ipc_broadcast,
@@ -281,7 +347,13 @@ impl Daemon {
 
         log::info!("Connection closed for {peer}");
         self.drop_transfers_of(&device_id).await;
-        self.outgoing_files.lock().await.retain(|_, o| o.connection != device_id);
+        self.outgoing_files.lock().await.retain(|_, o| {
+            let keep = o.connection != device_id;
+            if !keep {
+                forget_outgoing(o);
+            }
+            keep
+        });
         self.stop_screen(&device_id).await;
         self.stop_live_stream(&device_id).await;
         // a phone that vanished while holding a key, a button or the controller must not leave them stuck down
@@ -879,40 +951,82 @@ impl Daemon {
 
     // ----------------- Desktop -> phone file sending -----------------
 
-    /// IPC `SEND_FILE {deviceId, path}`: offers the file to the phone. Nothing is sent until the phone's owner accepts.
+    /// IPC `SEND_FILE {deviceId, path}`: offers a file, or a folder (zipped first), to the phone. Nothing is sent until the phone's
+    /// owner accepts.
     async fn start_file_push(&self, req: &Value) -> Value {
         let device = req.get("deviceId").and_then(Value::as_str).unwrap_or("");
         let path = PathBuf::from(req.get("path").and_then(Value::as_str).unwrap_or(""));
-        let size = match tokio::fs::metadata(&path).await {
-            Ok(m) if m.is_file() => m.len(),
-            _ => return json!({"status": "NO_FILE"}),
+        let connection = self.authenticated_connections.lock().await.iter().find(|(_, d)| d.as_str() == device).map(|(c, _)| c.clone());
+        let Some(connection) = connection else { return json!({"status": "NOT_CONNECTED"}) };
+        self.offer_path(&connection, path, None, false).await
+    }
+
+    /// Offers `path` on a live connection. A folder is zipped to a temporary file first. `temp`: `path` was made for this offer
+    /// (deleted when it ends). `rename`: what the phone should call it (default: the file's own name).
+    async fn offer_path(&self, connection: &str, path: PathBuf, rename: Option<String>, temp: bool) -> Value {
+        let meta = match tokio::fs::metadata(&path).await {
+            Ok(m) => m,
+            Err(_) => return json!({"status": "NO_FILE"}),
+        };
+        let (path, mut name, size, temp) = if meta.is_dir() {
+            let folder = path.file_name().map(|n| limits::clean_text(&n.to_string_lossy(), 190)).filter(|n| !n.is_empty()).unwrap_or_else(|| "folder".to_string());
+            let tmp_dir = outgoing_temp_dir();
+            if tokio::fs::create_dir_all(&tmp_dir).await.is_err() {
+                return json!({"status": "NO_FILE"});
+            }
+            let zipped = tmp_dir.join(format!("{:016x}.zip", rand::thread_rng().gen::<u64>()));
+            let (src, dst) = (path.clone(), zipped.clone());
+            match tokio::task::spawn_blocking(move || zip_folder(&src, &dst)).await {
+                Ok(Ok(_)) => {}
+                Ok(Err(e)) => {
+                    let _ = std::fs::remove_file(&zipped);
+                    return json!({"status": if e.kind() == std::io::ErrorKind::InvalidInput { "TOO_BIG" } else { "NO_FILE" }});
+                }
+                Err(_) => return json!({"status": "NO_FILE"}),
+            }
+            let size = tokio::fs::metadata(&zipped).await.map(|m| m.len()).unwrap_or(0);
+            (zipped, format!("{folder}.zip"), size, true)
+        } else if meta.is_file() {
+            let n = path.file_name().map(|n| limits::clean_text(&n.to_string_lossy(), 200)).filter(|n| !n.is_empty()).unwrap_or_else(|| "file".to_string());
+            (path, n, meta.len(), temp)
+        } else {
+            return json!({"status": "NO_FILE"});
+        };
+        if let Some(n) = rename {
+            name = limits::clean_text(&n, 200);
+        }
+        let gone = |temp: bool, path: &std::path::Path| {
+            if temp {
+                let _ = std::fs::remove_file(path);
+            }
         };
         if size == 0 {
+            gone(temp, &path);
             return json!({"status": "EMPTY"});
         }
         if size > limits::MAX_FILE_BYTES {
+            gone(temp, &path);
             return json!({"status": "TOO_BIG"});
         }
-        let name = path
-            .file_name()
-            .map(|n| limits::clean_text(&n.to_string_lossy(), 200))
-            .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| "file".to_string());
-        // the phone's live, authenticated connection
-        let connection = self.authenticated_connections.lock().await.iter().find(|(_, d)| d.as_str() == device).map(|(c, _)| c.clone());
-        let Some(connection) = connection else { return json!({"status": "NOT_CONNECTED"}) };
-        let Some(writer) = self.active_connections.lock().await.get(&connection).cloned() else { return json!({"status": "NOT_CONNECTED"}) };
+        let Some(writer) = self.active_connections.lock().await.get(connection).cloned() else {
+            gone(temp, &path);
+            return json!({"status": "NOT_CONNECTED"});
+        };
         let id = format!("push-{:016x}", rand::thread_rng().gen::<u64>());
         {
             let mut out = self.outgoing_files.lock().await;
-            if out.len() >= limits::MAX_TRANSFERS {
+            if out.len() >= limits::MAX_OFFERS {
+                drop(out);
+                gone(temp, &path);
                 return json!({"status": "BUSY"});
             }
-            out.insert(id.clone(), OutgoingFile { connection, path, name: name.clone(), size });
+            out.insert(id.clone(), OutgoingFile { connection: connection.to_string(), path: path.clone(), name: name.clone(), size, temp });
         }
-        log::info!("Offering {name} ({size} bytes) to {device}");
+        log::info!("Offering {name} ({size} bytes) on {connection}");
         if send_json(&writer, &json!({"type": "FILE_PUSH_OFFER", "transferId": id, "fileName": name, "fileSize": size})).await.is_err() {
-            self.outgoing_files.lock().await.remove(&id);
+            if let Some(o) = self.outgoing_files.lock().await.remove(&id) {
+                forget_outgoing(&o);
+            }
             return json!({"status": "NOT_CONNECTED"});
         }
         self.broadcast_local_ipc("FILE_SEND_OFFERED", json!({"transferId": id, "fileName": name, "fileSize": size})).await;
@@ -931,7 +1045,9 @@ impl Daemon {
                 _ => return,
             }
             if !accepted {
-                out.remove(&id);
+                if let Some(o) = out.remove(&id) {
+                    forget_outgoing(&o);
+                }
                 drop(out);
                 log::info!("The phone declined {id}");
                 self.broadcast_local_ipc("FILE_SEND_DECLINED", json!({"transferId": id})).await;
@@ -952,7 +1068,9 @@ impl Daemon {
                 say("FILE_SEND_PROGRESS", json!({"transferId": id, "sent": sent, "total": size}));
             })
             .await;
-            table.lock().await.remove(&id);
+            if let Some(o) = table.lock().await.remove(&id) {
+                forget_outgoing(&o);
+            }
             match result {
                 Ok(true) => {
                     log::info!("Sent {name} to the phone");
@@ -972,7 +1090,9 @@ impl Daemon {
         let id = packet.get("transferId").and_then(Value::as_str).unwrap_or("");
         let mut out = self.outgoing_files.lock().await;
         if matches!(out.get(id), Some(o) if o.connection == connection) {
-            out.remove(id);
+            if let Some(o) = out.remove(id) {
+                forget_outgoing(&o);
+            }
             drop(out);
             self.broadcast_local_ipc("FILE_SEND_CANCELLED", json!({"transferId": id})).await;
         }
@@ -1032,7 +1152,7 @@ impl Daemon {
                     .map(|(id, p)| json!({"deviceId": id, "name": p.name, "pin": p.pin()}))
                     .collect();
                 let pairing_open = matches!(*self.pairing_open_until.lock().await, Some(t) if t > Instant::now());
-                json!({"paired_devices": paired, "connected_device_ids": connected, "pairing_open": pairing_open, "pending_pairings": pending, "telemetry": telemetry, "active_transfers": active})
+                json!({"paired_devices": paired, "connected_device_ids": connected, "pairing_open": pairing_open, "pending_pairings": pending, "telemetry": telemetry, "active_transfers": active, "clipboard_files": self.clipboard_files.load(std::sync::atomic::Ordering::Relaxed)})
             }
             Some("GET_IDENTITY") => {
                 json!({
@@ -1100,7 +1220,13 @@ impl Daemon {
                     self.stop_screen_of_device(id).await;
                     {
                         let authed = self.authenticated_connections.lock().await;
-                        self.outgoing_files.lock().await.retain(|_, o| authed.get(&o.connection).map(|d| d != id).unwrap_or(true));
+                        self.outgoing_files.lock().await.retain(|_, o| {
+                            let keep = authed.get(&o.connection).map(|d| d != id).unwrap_or(true);
+                            if !keep {
+                                forget_outgoing(o);
+                            }
+                            keep
+                        });
                     }
                     self.authenticated_connections.lock().await.retain(|_, dev| dev != id);
                     self.broadcast_local_ipc("DEVICE_UNPAIRED", json!({"deviceId": id})).await;
@@ -1113,6 +1239,18 @@ impl Daemon {
                 json!({"status": "OK"})
             }
             Some("SEND_FILE") => self.start_file_push(req).await,
+            Some("SET_OPTION") => {
+                if let Some(on) = req.get("clipboardFiles").and_then(Value::as_bool) {
+                    self.clipboard_files.store(on, std::sync::atomic::Ordering::Relaxed);
+                    // forget what was offered, so turning it on offers what is on the clipboard now
+                    self.last_clip_items.lock().await.clear();
+                    let text = serde_json::to_string(&json!({"clipboard_files": on})).unwrap_or_default();
+                    let _ = std::fs::write(&self.options_file, text);
+                    json!({"status": "OK"})
+                } else {
+                    json!({"status": "UNKNOWN_OPTION"})
+                }
+            }
             Some("LOCK_SCREEN") => {
                 desktop::trigger_screen_lock();
                 json!({"status": "OK"})
@@ -1142,6 +1280,10 @@ impl Daemon {
     async fn clipboard_watcher_loop(self: Arc<Self>) {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            // files, folders and pictures first: a picture has no text, and the text check below would skip it
+            if self.clipboard_files.load(std::sync::atomic::Ordering::Relaxed) {
+                self.offer_clipboard_items().await;
+            }
             let current = desktop::get_linux_clipboard();
             if current.is_empty() {
                 continue;
@@ -1158,6 +1300,58 @@ impl Daemon {
                     "timestamp": unix_time(),
                 });
                 self.broadcast_to_devices(&packet).await;
+            }
+        }
+    }
+
+    /// Files, folders or a picture that were copied on the computer are offered to the connected phones (the phone still has to accept).
+    async fn offer_clipboard_items(&self) {
+        let items = tokio::task::spawn_blocking(desktop::get_clipboard_items).await.ok().flatten();
+        let Some(items) = items else {
+            self.last_clip_items.lock().await.clear();
+            return;
+        };
+        let signature = match &items {
+            desktop::ClipItems::Files(paths) => format!("files:{}", paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join("\n")),
+            desktop::ClipItems::Image(bytes) => {
+                use sha2::{Digest, Sha256};
+                format!("image:{:x}", Sha256::digest(bytes))
+            }
+        };
+        {
+            let mut last = self.last_clip_items.lock().await;
+            if *last == signature {
+                return;
+            }
+            *last = signature;
+        }
+        let connections: Vec<String> = self.authenticated_connections.lock().await.keys().cloned().collect();
+        if connections.is_empty() {
+            return;
+        }
+        log::info!("Offering what was copied on the computer to {} phone connection(s)", connections.len());
+        match items {
+            desktop::ClipItems::Files(paths) => {
+                let temp_dir = outgoing_temp_dir();
+                // a handful at most: copying a whole folder of files must not bury the phone in offers
+                for path in paths.into_iter().filter(|p| !p.starts_with(&temp_dir)).take(20) {
+                    for c in &connections {
+                        self.offer_path(c, path.clone(), None, false).await;
+                    }
+                }
+            }
+            desktop::ClipItems::Image(bytes) => {
+                let dir = outgoing_temp_dir();
+                if tokio::fs::create_dir_all(&dir).await.is_err() {
+                    return;
+                }
+                for c in &connections {
+                    // one copy per phone: each offer deletes its own file when it ends
+                    let path = dir.join(format!("{:016x}.png", rand::thread_rng().gen::<u64>()));
+                    if tokio::fs::write(&path, &bytes).await.is_ok() {
+                        self.offer_path(c, path, Some(format!("picture-{}.png", unix_time())), true).await;
+                    }
+                }
             }
         }
     }
