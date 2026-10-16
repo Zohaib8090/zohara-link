@@ -12,7 +12,8 @@ NoNewPrivileges=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK: the live stream (libnice) lists the computer's network addresses through it; without it the stream finds no address to offer the phone
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 RestrictRealtime=yes
 LockPersonality=yes
 SystemCallArchitectures=native

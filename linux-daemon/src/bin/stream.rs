@@ -92,7 +92,7 @@ pub fn pipeline_description(o: &Options, nvidia_awake: bool, have: &dyn Fn(&str)
     let _ = name;
     let source = match &o.source {
         Source::Test => "videotestsrc is-live=true pattern=ball".to_string(),
-        Source::PipeWire { fd, node } => format!("pipewiresrc fd={fd} path={node} do-timestamp=true always-copy=false"),
+        Source::PipeWire { fd, node } => format!("pipewiresrc fd={fd} path={node} do-timestamp=true always-copy=true"),
     };
     Ok(format!(
         "{source} ! queue max-size-buffers=2 leaky=downstream ! videoconvert ! videoscale ! videorate \
@@ -292,7 +292,14 @@ fn acquire_screen() -> Result<(i32, u32, ScreenShare), String> {
             }
             let _ = std::fs::write(token_path(), t);
         }
-        let node = started.streams().first().map(|s| s.pipe_wire_node_id()).ok_or("The desktop shared no screen.")?;
+        let first = started.streams().first().ok_or("The desktop shared no screen.")?;
+        eprintln!("screen share: node {} type {:?} size {:?} position {:?}", first.pipe_wire_node_id(), first.source_type(), first.size(), first.position());
+        // KDE can offer a blank virtual monitor instead of the real screen; streaming it shows black. Forget the choice and say so.
+        if matches!(first.source_type(), Some(SourceType::Virtual)) {
+            let _ = std::fs::remove_file(token_path());
+            return Err("The desktop shared a blank virtual screen instead of your real one. Try again and choose your own screen in the desktop's window.".to_string());
+        }
+        let node = first.pipe_wire_node_id();
         let fd = proxy.open_pipe_wire_remote(&session).await.map_err(|e| format!("The screen could not be opened ({e})."))?;
         Ok::<_, String>((fd.into_raw_fd(), node, session))
     })?;
