@@ -97,10 +97,10 @@ try:
     send(f,{'type':'CLIPBOARD_SYNC','text':'z'}); check('unpaired connection loses access',rd(f).get('type')=='ERROR')
     s2,f2=conn(); send(f2,{'type':'AUTH','deviceId':'phone1','token':tok}); check('old token useless after unpair',rd(f2)['status']=='FAILED')
     # a connection that never authenticates is dropped after the deadline
-    s3,f3=conn(); t0=time.time()
+    s3,f3=conn(); s3.settimeout(75); t0=time.time()
     try: gone = (s3.recv(10)==b'')
     except Exception: gone=False
-    check('silent connection dropped after ~15s',gone and 13<time.time()-t0<20)
+    check('silent connection dropped after ~60s',gone and 57<time.time()-t0<66)
 finally:
     d.terminate()
 print('ALL PASS' if ok else 'SOME FAILED'); sys.exit(0 if ok else 1)

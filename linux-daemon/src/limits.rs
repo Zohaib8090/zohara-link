@@ -10,7 +10,7 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt};
 /// Longest accepted line (one JSON packet). A 32 KB file chunk is about 44 KB once base64-encoded.
 pub const MAX_LINE: usize = 256 * 1024;
 /// A connection must pair or present its token within this many seconds, or it is dropped.
-pub const AUTH_DEADLINE_SECS: u64 = 15;
+pub const AUTH_DEADLINE_SECS: u64 = 60;
 /// Connections open at once, and how many of those may still be unauthenticated.
 pub const MAX_CONNECTIONS: usize = 32;
 pub const MAX_UNAUTHENTICATED: usize = 8;

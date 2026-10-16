@@ -62,7 +62,7 @@ The Android changes are **not compiled or run yet** (no Android toolchain in the
 ## Against attacks on the daemon itself
 
 * One packet line is at most 256 KB (a file chunk is about 44 KB). A longer line closes the connection instead of filling memory.
-* A connection that has not paired or sent its token within 15 seconds is dropped. At most 32 connections, 8 unauthenticated.
+* A connection that has not paired or sent its token within 60 seconds is dropped (the clock starts when the phone connects, so typing the PIN needs time; it was 15 and too short, 2026-10-16). At most 32 connections, 8 unauthenticated.
 * The private key is created with mode 600 (an older key is tightened on start), the config folder is 700, the paired-phones
   list and the local socket 600. The systemd service drops privileges it does not need (`NoNewPrivileges`, address families,
   `UMask=0077`...).
