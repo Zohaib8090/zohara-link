@@ -15,9 +15,13 @@ import org.webrtc.MediaConstraints
 import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.PlatformSoftwareVideoDecoderFactory
 import org.webrtc.RtpReceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
+import org.webrtc.VideoCodecInfo
+import org.webrtc.VideoDecoder
+import org.webrtc.VideoDecoderFactory
 import org.webrtc.VideoTrack
 import java.nio.ByteBuffer
 
@@ -50,7 +54,7 @@ class GameStreamClient(context: Context, private val sendSignal: (JSONObject) ->
     init {
         PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context.applicationContext).createInitializationOptions())
         factory = PeerConnectionFactory.builder()
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(eglBase.eglBaseContext))
+            .setVideoDecoderFactory(DecoderFactoryWithSoftwareFallback(eglBase.eglBaseContext))
             .setVideoEncoderFactory(DefaultVideoEncoderFactory(eglBase.eglBaseContext, true, true))
             .createPeerConnectionFactory()
     }
@@ -187,5 +191,25 @@ class GameStreamClient(context: Context, private val sendSignal: (JSONObject) ->
         stop()
         factory.dispose()
         eglBase.release()
+    }
+}
+
+/**
+ * Android's own decoders first (the phone's hardware H.264), and Android's software H.264 when there is no hardware one.
+ * libwebrtc leaves software H.264 out by default, so a device without a hardware decoder (the Waydroid test phone, some
+ * tablets) answered "no video codec in common" and the stream showed nothing.
+ */
+private class DecoderFactoryWithSoftwareFallback(context: EglBase.Context) : VideoDecoderFactory {
+    private val main = DefaultVideoDecoderFactory(context)
+    private val platformSoftware = PlatformSoftwareVideoDecoderFactory(context)
+
+    override fun createDecoder(info: VideoCodecInfo): VideoDecoder? = main.createDecoder(info) ?: platformSoftware.createDecoder(info)
+
+    override fun getSupportedCodecs(): Array<VideoCodecInfo> {
+        val all = main.supportedCodecs.toMutableList()
+        for (c in platformSoftware.supportedCodecs) {
+            if (all.none { it.name.equals(c.name, ignoreCase = true) && it.params == c.params }) all.add(c)
+        }
+        return all.toTypedArray()
     }
 }
