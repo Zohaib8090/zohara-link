@@ -62,6 +62,23 @@ minutes to find. (More traps for the whole project: `GOTCHA.md` in the `zohara` 
 * **Apps cannot install themselves silently.** The update hands the APK to Android's installer; the person confirms, and must allow
   "install unknown apps" for Zohara Link once.
 
+## Streaming and input (2026-10-15/16)
+
+* **`/dev/uinput` writes beat spawning `ydotool`.** A process per mouse move made the pointer lag; the daemon now writes events itself
+  (`linux-daemon/src/uinput.rs`, `docs/INPUT.md`). Release held keys, buttons and the controller when a connection ends.
+* **The stream program is separate on purpose** (`zohara-linkd-stream`): the daemon must not link GStreamer, or a missing plugin would
+  stop the whole daemon. Plugins are installed by the "Set up game streaming" button in Settings, not by package dependencies.
+* **The systemd unit's `RestrictAddressFamilies` must include `AF_NETLINK`** or libnice cannot list addresses (no candidates, stream
+  dies after about 20 s). Any new sandbox option on this unit needs a streaming test, not just a start.
+* **KDE can share a blank virtual monitor** (see `docs/STREAMING.md`): black video. Check `kscreen-doctor -o` during a stream.
+* **`pkill -f NAME` inside a command that mentions NAME kills its own shell** (exit 144). Use `kill $(pgrep -x name)`. Process names are
+  cut at 15 characters (`zohara-linkd-st`).
+* **The Android debug APK is 59 MB with WebRTC**: too big for chat attachments; it is in the project folder on the laptop. Debug builds
+  cannot update each other: uninstall first, pair again.
+* **The Waydroid shell needs root and there is no `adb` on the laptop**: test the phone side through the daemon's log
+  (`journalctl --user -u zohara-linkd`), not by driving the Waydroid window.
+* **gstreamer-rs 0.23 needs `features = ["v1_22"]`** for the WebRTC data channel types.
+
 ## Process
 
 * **`main` moves while you work** (the owner edits too). `git push` can be refused as non-fast-forward: fetch, merge, push again.

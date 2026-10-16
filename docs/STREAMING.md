@@ -72,3 +72,25 @@ See the end of this file; it is updated with every step.
   which needs the owner's password), and nobody has opened the stream on a phone. Latency has not been measured.
 * Next: run the first real stream (laptop plugins installed, phone with build 111), then fix what shows up; then sound (Opus), adaptive
   bitrate, 120 fps, on-screen latency readout, a quality picker in the app.
+
+### 2026-10-16: first real stream, and what it taught
+* **The real screen streams.** `zohara-linkd-stream` with the portal source, received by headless Chrome as the phone: 1280x720, about 60 fps,
+  0 packets lost, state "streaming", and the data channel's message reached the daemon side. (Chrome's own jitter buffer sat near 110 ms; the
+  Android client can be tuned lower. End-to-end delay has still not been measured.) The test harness is `stream-test.mjs` in the session
+  scratch folder: spawn the stream program, answer its offer in Chrome with `puppeteer-core` (`/opt/google/chrome/chrome`), read
+  `getStats()`; it is not in the repo yet.
+* **The Waydroid app is a real test phone.** Waydroid (Android in a container on the laptop) with the Zohara Link app pairs with the daemon
+  at `192.168.240.1`; the daemon log showed it sending `STREAM_START`, answering the offer and sending its candidates.
+* **Trap 1, the black screen: KDE offers a blank *virtual monitor*.** While a stream runs, `kscreen-doctor -o` lists an extra output
+  `Virtual-virtual-xdp-kde-...` (1920x1080, next to the real screen). The stored screen-sharing choice had picked it, so the stream
+  was black (mean brightness 3 against 36 for the real screen). The program now logs what the portal shared and, if it is a virtual
+  screen, deletes `~/.config/zohara-link/screencast-token` and says so; the next try shows the desktop's window again, where the person
+  picks the real screen (the log line `screen share: node N type Some(Monitor) size ... position ...` shows what was chosen).
+* **Trap 2, no connection from the phone: the daemon's systemd unit blocked netlink.** `RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX`
+  makes libnice fail with "Failed to retrieve list of network interfaces:Address family not supported by protocol", so the computer
+  offered no address and the stream died after about 20 s. The unit now allows `AF_NETLINK` (daemon `11a5066`). Until the package
+  update is installed, the laptop used a drop-in `~/.config/systemd/user/zohara-linkd.service.d/netlink-test.conf` (delete it after).
+* Frames are copied (`always-copy=true`) instead of passed as DMA-BUF: simpler and safe across the Intel and NVIDIA chips. Zero-copy is
+  a later optimisation once the delay is measured.
+* gstreamer-rs: `create-data-channel` returns nothing until the pipeline is playing, and the typed `WebRTCDataChannel` refuses
+  the object ("expected GstWebRTCDataChannel, got GstWebRTCDataChannel"): handle it as a plain `glib::Object`.
