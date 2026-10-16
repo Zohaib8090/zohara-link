@@ -15,6 +15,17 @@ use tokio_rustls::TlsAcceptor;
 type TlsWriteHalf = tokio::io::WriteHalf<tokio_rustls::server::TlsStream<TcpStream>>;
 type SharedWriter = Arc<TokioMutex<TlsWriteHalf>>;
 
+/// A file offered to a phone (desktop to phone). `connection` is the live connection it was offered on.
+struct OutgoingFile {
+    connection: String,
+    path: PathBuf,
+    name: String,
+    size: u64,
+}
+
+/// Raw bytes per chunk sent to a phone: about 64 KiB once base64-encoded, well under the 256 KiB line limit.
+const PUSH_CHUNK_BYTES: usize = 48 * 1024;
+
 pub struct Daemon {
     port: u16,
     downloads_dir: PathBuf,
@@ -51,6 +62,8 @@ pub struct Daemon {
     active_connections: TokioMutex<HashMap<String, SharedWriter>>,
     device_telemetry: TokioMutex<HashMap<String, Value>>,
     active_file_transfers: TokioMutex<HashMap<String, FileTransfer>>,
+    /// Files the computer is sending to a phone: offered first, streamed only after the phone accepts.
+    outgoing_files: Arc<TokioMutex<HashMap<String, OutgoingFile>>>,
     last_clipboard_text: TokioMutex<String>,
     /// The last "now playing" state pushed to phones, so a phone that connects later gets it at once.
     last_media: TokioMutex<Option<Value>>,
@@ -126,6 +139,7 @@ impl Daemon {
             active_connections: TokioMutex::new(HashMap::new()),
             device_telemetry: TokioMutex::new(HashMap::new()),
             active_file_transfers: TokioMutex::new(HashMap::new()),
+            outgoing_files: Arc::new(TokioMutex::new(HashMap::new())),
             last_clipboard_text: TokioMutex::new(String::new()),
             last_media: TokioMutex::new(None),
             notify_gate: std::sync::Mutex::new(limits::NotifyGate::default()),
@@ -267,6 +281,7 @@ impl Daemon {
 
         log::info!("Connection closed for {peer}");
         self.drop_transfers_of(&device_id).await;
+        self.outgoing_files.lock().await.retain(|_, o| o.connection != device_id);
         self.stop_screen(&device_id).await;
         self.stop_live_stream(&device_id).await;
         // a phone that vanished while holding a key, a button or the controller must not leave them stuck down
@@ -308,6 +323,8 @@ impl Daemon {
             "FILE_OFFER" => self.handle_file_offer(device_id, &packet, writer).await,
             "FILE_CHUNK" => self.handle_file_chunk(&packet).await,
             "FILE_COMPLETE" => self.handle_file_complete(&packet).await,
+            "FILE_PUSH_ACCEPT" => self.handle_push_accept(device_id, &packet, writer).await,
+            "FILE_PUSH_CANCEL" => self.handle_push_cancel(device_id, &packet).await,
             "INPUT_EVENT" => {
                 // Controlling the mouse is the most dangerous thing a phone can do here: it needs its own permission.
                 let dev = self.authenticated_connections.lock().await.get(device_id).cloned().unwrap_or_default();
@@ -860,6 +877,107 @@ impl Daemon {
         .await;
     }
 
+    // ----------------- Desktop -> phone file sending -----------------
+
+    /// IPC `SEND_FILE {deviceId, path}`: offers the file to the phone. Nothing is sent until the phone's owner accepts.
+    async fn start_file_push(&self, req: &Value) -> Value {
+        let device = req.get("deviceId").and_then(Value::as_str).unwrap_or("");
+        let path = PathBuf::from(req.get("path").and_then(Value::as_str).unwrap_or(""));
+        let size = match tokio::fs::metadata(&path).await {
+            Ok(m) if m.is_file() => m.len(),
+            _ => return json!({"status": "NO_FILE"}),
+        };
+        if size == 0 {
+            return json!({"status": "EMPTY"});
+        }
+        if size > limits::MAX_FILE_BYTES {
+            return json!({"status": "TOO_BIG"});
+        }
+        let name = path
+            .file_name()
+            .map(|n| limits::clean_text(&n.to_string_lossy(), 200))
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| "file".to_string());
+        // the phone's live, authenticated connection
+        let connection = self.authenticated_connections.lock().await.iter().find(|(_, d)| d.as_str() == device).map(|(c, _)| c.clone());
+        let Some(connection) = connection else { return json!({"status": "NOT_CONNECTED"}) };
+        let Some(writer) = self.active_connections.lock().await.get(&connection).cloned() else { return json!({"status": "NOT_CONNECTED"}) };
+        let id = format!("push-{:016x}", rand::thread_rng().gen::<u64>());
+        {
+            let mut out = self.outgoing_files.lock().await;
+            if out.len() >= limits::MAX_TRANSFERS {
+                return json!({"status": "BUSY"});
+            }
+            out.insert(id.clone(), OutgoingFile { connection, path, name: name.clone(), size });
+        }
+        log::info!("Offering {name} ({size} bytes) to {device}");
+        if send_json(&writer, &json!({"type": "FILE_PUSH_OFFER", "transferId": id, "fileName": name, "fileSize": size})).await.is_err() {
+            self.outgoing_files.lock().await.remove(&id);
+            return json!({"status": "NOT_CONNECTED"});
+        }
+        self.broadcast_local_ipc("FILE_SEND_OFFERED", json!({"transferId": id, "fileName": name, "fileSize": size})).await;
+        json!({"status": "OFFERED", "transferId": id})
+    }
+
+    /// The phone answered the offer. Declined: forget it. Accepted: stream the file in the background.
+    async fn handle_push_accept(&self, connection: &str, packet: &Value, writer: &SharedWriter) {
+        let id = packet.get("transferId").and_then(Value::as_str).unwrap_or("").to_string();
+        let accepted = packet.get("accepted").and_then(Value::as_bool).unwrap_or(false);
+        let (path, name, size) = {
+            let mut out = self.outgoing_files.lock().await;
+            // only the connection the offer went to may answer it
+            match out.get(&id) {
+                Some(o) if o.connection == connection => {}
+                _ => return,
+            }
+            if !accepted {
+                out.remove(&id);
+                drop(out);
+                log::info!("The phone declined {id}");
+                self.broadcast_local_ipc("FILE_SEND_DECLINED", json!({"transferId": id})).await;
+                return;
+            }
+            let o = &out[&id];
+            (o.path.clone(), o.name.clone(), o.size)
+        };
+        let (writer, table, ipc) = (writer.clone(), self.outgoing_files.clone(), self.ipc_broadcast.clone());
+        tokio::spawn(async move {
+            let say = |event: &str, data: Value| {
+                if let Ok(mut line) = serde_json::to_string(&json!({"event": event, "data": data})) {
+                    line.push('\n');
+                    let _ = ipc.send(line);
+                }
+            };
+            let result = push_file_chunks(&writer, &table, &id, &path, size, |sent| {
+                say("FILE_SEND_PROGRESS", json!({"transferId": id, "sent": sent, "total": size}));
+            })
+            .await;
+            table.lock().await.remove(&id);
+            match result {
+                Ok(true) => {
+                    log::info!("Sent {name} to the phone");
+                    say("FILE_SEND_COMPLETE", json!({"transferId": id, "fileName": name}));
+                }
+                Ok(false) => say("FILE_SEND_CANCELLED", json!({"transferId": id})),
+                Err(e) => {
+                    log::warn!("Sending {name} failed: {e}");
+                    say("FILE_SEND_FAILED", json!({"transferId": id, "error": e.to_string()}));
+                }
+            }
+        });
+    }
+
+    /// The phone stopped a transfer: taking it out of the table makes the sender stop at the next chunk.
+    async fn handle_push_cancel(&self, connection: &str, packet: &Value) {
+        let id = packet.get("transferId").and_then(Value::as_str).unwrap_or("");
+        let mut out = self.outgoing_files.lock().await;
+        if matches!(out.get(id), Some(o) if o.connection == connection) {
+            out.remove(id);
+            drop(out);
+            self.broadcast_local_ipc("FILE_SEND_CANCELLED", json!({"transferId": id})).await;
+        }
+    }
+
     // ----------------- Local Unix-socket IPC -----------------
 
     async fn handle_unix_client(self: Arc<Self>, stream: UnixStream) {
@@ -980,6 +1098,10 @@ impl Daemon {
                     self.save_paired_devices().await;
                     // Whatever is connected as that device loses access at once.
                     self.stop_screen_of_device(id).await;
+                    {
+                        let authed = self.authenticated_connections.lock().await;
+                        self.outgoing_files.lock().await.retain(|_, o| authed.get(&o.connection).map(|d| d != id).unwrap_or(true));
+                    }
                     self.authenticated_connections.lock().await.retain(|_, dev| dev != id);
                     self.broadcast_local_ipc("DEVICE_UNPAIRED", json!({"deviceId": id})).await;
                 }
@@ -990,6 +1112,7 @@ impl Daemon {
                 self.broadcast_to_devices(&json!({"type": "CLIPBOARD_SYNC", "text": text})).await;
                 json!({"status": "OK"})
             }
+            Some("SEND_FILE") => self.start_file_push(req).await,
             Some("LOCK_SCREEN") => {
                 desktop::trigger_screen_lock();
                 json!({"status": "OK"})
@@ -1159,6 +1282,41 @@ fn load_paired_devices(path: &PathBuf) -> HashMap<String, PairedDevice> {
         Ok(text) => serde_json::from_str(&text).unwrap_or_default(),
         Err(_) => HashMap::new(),
     }
+}
+
+/// Streams `path` to a phone as FILE_PUSH_CHUNK lines, then FILE_PUSH_COMPLETE. `Ok(false)`: the transfer was taken out of the
+/// table (the phone cancelled or disconnected) and sending stopped. `progress` gets the bytes sent so far, about every 2 percent.
+async fn push_file_chunks(
+    writer: &SharedWriter,
+    table: &TokioMutex<HashMap<String, OutgoingFile>>,
+    id: &str,
+    path: &std::path::Path,
+    size: u64,
+    progress: impl Fn(u64),
+) -> std::io::Result<bool> {
+    use base64::Engine;
+    use tokio::io::AsyncReadExt;
+    let mut file = tokio::fs::File::open(path).await?;
+    let mut buf = vec![0u8; PUSH_CHUNK_BYTES];
+    let (mut sent, mut last_reported) = (0u64, 0u64);
+    loop {
+        if !table.lock().await.contains_key(id) {
+            return Ok(false);
+        }
+        let n = file.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        sent += n as u64;
+        let chunk = base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
+        send_json(writer, &json!({"type": "FILE_PUSH_CHUNK", "transferId": id, "payloadBase64": chunk})).await?;
+        if sent - last_reported >= (size / 50).max(1) {
+            last_reported = sent;
+            progress(sent);
+        }
+    }
+    send_json(writer, &json!({"type": "FILE_PUSH_COMPLETE", "transferId": id})).await?;
+    Ok(true)
 }
 
 async fn send_json(writer: &SharedWriter, obj: &Value) -> std::io::Result<()> {

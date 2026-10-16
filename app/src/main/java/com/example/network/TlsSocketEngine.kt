@@ -80,6 +80,50 @@ class TlsSocketEngine(private val context: Context) {
     private val _streamMessages = kotlinx.coroutines.flow.MutableSharedFlow<JSONObject>(extraBufferCapacity = 128)
     val streamMessages: kotlinx.coroutines.flow.SharedFlow<JSONObject> = _streamMessages
 
+    /** A file the computer wants to send to this phone, waiting for the person's yes or no. */
+    data class FileOffer(val transferId: String, val name: String, val size: Long)
+
+    private val _incomingOffer = MutableStateFlow<FileOffer?>(null)
+    val incomingOffer: StateFlow<FileOffer?> = _incomingOffer.asStateFlow()
+
+    /** Percent of the file being received from the computer, or null when none is. */
+    private val _receiveProgress = MutableStateFlow<Int?>(null)
+    val receiveProgress: StateFlow<Int?> = _receiveProgress.asStateFlow()
+
+    private val receiver = FileReceiver(context)
+
+    /** The person's answer to [incomingOffer]. */
+    fun answerFileOffer(accept: Boolean) {
+        val offer = _incomingOffer.value ?: return
+        _incomingOffer.value = null
+        val ok = accept && receiver.begin(offer.transferId, offer.name, offer.size)
+        if (accept && !ok) _notices.tryEmit("This file could not be saved on the phone.")
+        sendJson(JSONObject().apply {
+            put("type", ProtocolTypes.FILE_PUSH_ACCEPT)
+            put("transferId", offer.transferId)
+            put("accepted", ok)
+            if (!ok) put("error", if (accept) "could not save" else "declined")
+        })
+        if (ok) _receiveProgress.value = 0
+    }
+
+    private fun cancelPush(id: String, why: String) {
+        receiver.abort(id)
+        _receiveProgress.value = null
+        sendJson(JSONObject().apply {
+            put("type", ProtocolTypes.FILE_PUSH_CANCEL)
+            put("transferId", id)
+        })
+        _notices.tryEmit(why)
+    }
+
+    /** The connection is gone: unanswered offers and half-received files go with it. */
+    private fun clearIncomingFiles() {
+        _incomingOffer.value = null
+        _receiveProgress.value = null
+        receiver.abortAll()
+    }
+
     /** Sends a message as it is (the stream's answer and candidates). */
     fun sendRaw(o: JSONObject) = sendJson(o)
 
@@ -266,6 +310,7 @@ class TlsSocketEngine(private val context: Context) {
         } catch (e: Exception) {
             Log.d(TAG, "Socket read closed: ${e.message}")
         } finally {
+            clearIncomingFiles()
             if (_connectionState.value is ConnectionState.Connected) {
                 _connectionState.value = ConnectionState.Disconnected
             }
@@ -287,6 +332,34 @@ class TlsSocketEngine(private val context: Context) {
                     return
                 }
                 _connectionState.value = ConnectionState.PairingRequired(shortFingerprint(observedFingerprint), serverName)
+            }
+            ProtocolTypes.FILE_PUSH_OFFER -> {
+                val id = json.optString("transferId")
+                if (id.isEmpty()) return
+                // an offer nobody answered is declined by the next one
+                _incomingOffer.value?.let { old ->
+                    sendJson(JSONObject().apply {
+                        put("type", ProtocolTypes.FILE_PUSH_ACCEPT)
+                        put("transferId", old.transferId)
+                        put("accepted", false)
+                        put("error", "declined")
+                    })
+                }
+                _incomingOffer.value = FileOffer(id, json.optString("fileName", "file"), json.optLong("fileSize", 0L))
+            }
+            ProtocolTypes.FILE_PUSH_CHUNK -> {
+                val id = json.optString("transferId")
+                val bytes = try { Base64.decode(json.optString("payloadBase64"), Base64.DEFAULT) } catch (e: Exception) { null }
+                if (bytes == null || !receiver.write(id, bytes)) {
+                    cancelPush(id, "The file from the computer could not be saved.")
+                } else {
+                    _receiveProgress.value = receiver.percent(id)
+                }
+            }
+            ProtocolTypes.FILE_PUSH_COMPLETE -> {
+                val saved = receiver.finish(json.optString("transferId"))
+                _receiveProgress.value = null
+                _notices.tryEmit(if (saved != null) "Saved $saved in Downloads/ZoharaLink" else "The file did not arrive completely.")
             }
             ProtocolTypes.FILE_ACCEPT -> {
                 val accepted = json.optBoolean("accepted", true)
@@ -694,6 +767,7 @@ class TlsSocketEngine(private val context: Context) {
         socket = null
         reader = null
         writer = null
+        clearIncomingFiles()
         _screenFrame.value = null
         _connectionState.value = ConnectionState.Disconnected
     }

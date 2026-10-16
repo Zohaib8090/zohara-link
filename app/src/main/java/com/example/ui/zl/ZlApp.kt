@@ -12,9 +12,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -163,6 +166,23 @@ fun ZlApp(vm: EcosystemViewModel) {
                 else msg
             )
         }
+    }
+
+    // A file the computer wants to send: nothing is saved until the person says yes.
+    val fileOffer by vm.incomingOffer.collectAsStateWithLifecycle()
+    val receiving by vm.receiveProgress.collectAsStateWithLifecycle()
+    LaunchedEffect(receiving == null) {
+        if (receiving != null) say("Receiving the file from the computer")
+    }
+    fileOffer?.let { o ->
+        AlertDialog(
+            onDismissRequest = { vm.answerFileOffer(false) },
+            containerColor = Zl.card,
+            title = { Text("The computer wants to send you a file", color = Zl.text) },
+            text = { Text("${o.name} (${readableSize(o.size)}). If you accept, it is saved in Downloads/ZoharaLink.", color = Zl.muted) },
+            confirmButton = { TextButton(onClick = { vm.answerFileOffer(true) }) { Text("Accept", color = Zl.accent) } },
+            dismissButton = { TextButton(onClick = { vm.answerFileOffer(false) }) { Text("Decline", color = Zl.muted) } },
+        )
     }
 
     // Look for computers only while the Find screen is open.
@@ -363,4 +383,12 @@ fun ZlApp(vm: EcosystemViewModel) {
             SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(bottom = 96.dp))
         }
     }
+}
+
+/** 59 MB, 1.2 GB: a size a person can read. */
+private fun readableSize(bytes: Long): String = when {
+    bytes <= 0 -> "size unknown"
+    bytes < 1024 * 1024 -> "${maxOf(1, bytes / 1024)} KB"
+    bytes < 1024L * 1024 * 1024 -> "${bytes / (1024 * 1024)} MB"
+    else -> String.format("%.1f GB", bytes / (1024.0 * 1024 * 1024))
 }

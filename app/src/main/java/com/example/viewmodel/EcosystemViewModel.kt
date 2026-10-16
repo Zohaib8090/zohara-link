@@ -246,6 +246,11 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
     /** Messages from the computer worth showing (for example: mouse control is not allowed for this phone). */
     val notices get() = socketEngine.notices
 
+    /** A file the computer wants to send to this phone (null when none), and the person's answer. */
+    val incomingOffer get() = socketEngine.incomingOffer
+    val receiveProgress get() = socketEngine.receiveProgress
+    fun answerFileOffer(accept: Boolean) = socketEngine.answerFileOffer(accept)
+
     fun computerCode(): String = socketEngine.computerCode()
 
     /** Unpair from this phone's side: forget the pinned certificate and token, and remove the saved computer. */

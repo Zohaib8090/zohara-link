@@ -19,6 +19,12 @@ object ProtocolTypes {
     const val FILE_CHUNK = "FILE_CHUNK"
     const val FILE_COMPLETE = "FILE_COMPLETE"
     const val FILE_CANCEL = "FILE_CANCEL"
+    // the computer sends a file to this phone (the phone must accept first)
+    const val FILE_PUSH_OFFER = "FILE_PUSH_OFFER"
+    const val FILE_PUSH_ACCEPT = "FILE_PUSH_ACCEPT"
+    const val FILE_PUSH_CHUNK = "FILE_PUSH_CHUNK"
+    const val FILE_PUSH_COMPLETE = "FILE_PUSH_COMPLETE"
+    const val FILE_PUSH_CANCEL = "FILE_PUSH_CANCEL"
     const val NOTIFICATION_POST = "NOTIFICATION_POST"
     const val NOTIFICATION_DISMISS = "NOTIFICATION_DISMISS"
     const val NOTIFICATION_REPLY = "NOTIFICATION_REPLY"

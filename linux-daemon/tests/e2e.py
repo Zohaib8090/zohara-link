@@ -87,6 +87,27 @@ try:
     s,f=conn(); send(f,{'type':'CLIPBOARD_SYNC','text':'x'}); check('unauthenticated packet refused',rd(f).get('type')=='ERROR')
     send(f,{'type':'AUTH','deviceId':'phone1','token':'0'*64}); check('wrong token refused',rd(f)['status']=='FAILED')
     send(f,{'type':'AUTH','deviceId':'phone1','token':tok}); check('right token accepted',rd(f)['status']=='SUCCESS')
+    # desktop to phone: an offer first, bytes only after the phone accepts, and they arrive intact
+    src=W+'/send-me.bin'; payload=os.urandom(150*1024+7); open(src,'wb').write(payload)
+    check('sending to an unknown device says so',call({'command':'SEND_FILE','deviceId':'nobody','path':src})['status']=='NOT_CONNECTED')
+    check('sending a missing file says so',call({'command':'SEND_FILE','deviceId':'phone1','path':W+'/nope'})['status']=='NO_FILE')
+    r=call({'command':'SEND_FILE','deviceId':'phone1','path':src}); check('offer made',r['status']=='OFFERED')
+    o=rd(f); check('phone gets the offer with name and size',o['type']=='FILE_PUSH_OFFER' and o['fileName']=='send-me.bin' and o['fileSize']==len(payload))
+    send(f,{'type':'FILE_PUSH_ACCEPT','transferId':o['transferId'],'accepted':True})
+    got=b''
+    while True:
+        m=rd(f)
+        if m['type']=='FILE_PUSH_CHUNK': check_id=(m['transferId']==o['transferId']); got+=base64.b64decode(m['payloadBase64'])
+        elif m['type']=='FILE_PUSH_COMPLETE': break
+    check('the file arrives byte for byte',got==payload)
+    # a declined offer sends nothing and tells the desktop
+    r=call({'command':'SEND_FILE','deviceId':'phone1','path':src}); o2=rd(f)
+    send(f,{'type':'FILE_PUSH_ACCEPT','transferId':o2['transferId'],'accepted':False})
+    check('declined offer reported to the desktop',next_event('FILE_SEND_DECLINED')['transferId']==o2['transferId'])
+    # only the connection an offer went to may answer it
+    r=call({'command':'SEND_FILE','deviceId':'phone1','path':src}); o3=rd(f)
+    send(f,{'type':'FILE_PUSH_CANCEL','transferId':o3['transferId']})
+    check('phone can cancel an offer',next_event('FILE_SEND_CANCELLED')['transferId']==o3['transferId'])
     # a line that never ends is cut off, not buffered
     s9,f9=conn(); s9.sendall(b'a'*(300*1024)); time.sleep(.5)
     try: dead = (s9.recv(10)==b'')
