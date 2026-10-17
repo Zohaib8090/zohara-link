@@ -99,8 +99,9 @@ See the end of this file; it is updated with every step.
 The owner saw the picture arrive late on the phone. Nothing was measured on a real phone yet, so this is what was changed on suspicion, and a way to measure:
 * **Laptop** (`src/bin/stream.rs`): the capture queue holds one frame (was two and a full second of time), x264 uses sliced threads, and the stream
   program prints which encoder it picked (`encoder: vah264enc` in the daemon log).
-* **Phone** (`GameStreamClient.kt`): the receiver's minimum buffer is asked to be 0, and the game screen now shows a line of real numbers
+* **Phone** (`GameStreamClient.kt`): the game screen now shows a line of real numbers
   (`fps · wait · decode · trip · lost · Mb/s · direct/relay`, tap it to hide; also in `adb logcat -s ZLStream`). Read them like this:
   *wait* high = the phone's buffer, *decode* high = a slow decoder (software H.264), *trip* high or **relay** = the network path (Tailscale through a
   relay server adds a lot; the same Wi-Fi is direct), *lost* above 1% = Wi-Fi trouble, low *fps* with low everything else = the laptop is too busy to encode.
+* `RtpReceiver.setJitterBufferMinimumDelay` does not exist in `stream-webrtc-android` 1.3.10 (CI: unresolved reference); the buffer is libwebrtc's own.
 * Still to do once the numbers are known: adaptive bitrate, a lower default resolution on a relay, sound (Opus).

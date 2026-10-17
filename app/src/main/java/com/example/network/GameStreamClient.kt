@@ -203,8 +203,6 @@ class GameStreamClient(context: Context, private val sendSignal: (JSONObject) ->
         }
         override fun onRenegotiationNeeded() {}
         override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
-            // show each picture as soon as it is decoded: the buffer may not be held for smoothness, a game wants the newest frame
-            try { receiver?.setJitterBufferMinimumDelay(0.0) } catch (_: Throwable) {}
             (receiver?.track() as? VideoTrack)?.let {
                 it.setEnabled(true)
                 _video.value = it
