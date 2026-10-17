@@ -16,6 +16,7 @@ import org.webrtc.MediaStream
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
 import org.webrtc.PlatformSoftwareVideoDecoderFactory
+import org.webrtc.RTCStatsReport
 import org.webrtc.RtpReceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
@@ -24,6 +25,12 @@ import org.webrtc.VideoDecoder
 import org.webrtc.VideoDecoderFactory
 import org.webrtc.VideoTrack
 import java.nio.ByteBuffer
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 /**
  * The phone's end of the live game stream (see zohara-link/docs/STREAMING.md).
@@ -33,6 +40,20 @@ import java.nio.ByteBuffer
  * same INPUT_EVENT bodies the touchpad uses, so a move or a controller state reaches the computer without going through the
  * slower encrypted message connection. The signalling (offer, answer, candidates) travels over the paired connection.
  */
+/** What the stream is doing right now, for the small numbers on the screen: where the delay comes from. */
+data class StreamStats(
+    val fps: Int = 0,
+    /** Time the picture waits in the phone's buffer before it is decoded. */
+    val bufferMs: Int = 0,
+    val decodeMs: Int = 0,
+    /** Round trip to the computer. */
+    val rttMs: Int = 0,
+    val lostPercent: Double = 0.0,
+    val kbps: Int = 0,
+    /** direct (same network or a direct path), relay (through a server: slower), or "" while unknown. */
+    val path: String = "",
+)
+
 class GameStreamClient(context: Context, private val sendSignal: (JSONObject) -> Unit) {
     val eglBase: EglBase = EglBase.create()
 
@@ -45,6 +66,11 @@ class GameStreamClient(context: Context, private val sendSignal: (JSONObject) ->
 
     private val _problem = MutableStateFlow<String?>(null)
     val problem: StateFlow<String?> = _problem.asStateFlow()
+
+    private val _stats = MutableStateFlow(StreamStats())
+    val stats: StateFlow<StreamStats> = _stats.asStateFlow()
+    private var statsJob: Job? = null
+    private val statsScope = CoroutineScope(Dispatchers.Default)
 
     private val factory: PeerConnectionFactory
     private var pc: PeerConnection? = null
@@ -81,6 +107,8 @@ class GameStreamClient(context: Context, private val sendSignal: (JSONObject) ->
 
     fun stop(notifyComputer: Boolean = true) {
         if (notifyComputer && _state.value != "idle") sendSignal(JSONObject().apply { put("type", ProtocolTypes.STREAM_STOP) })
+        statsJob?.cancel()
+        _stats.value = StreamStats()
         channel?.close()
         channel = null
         pc?.close()
@@ -146,7 +174,10 @@ class GameStreamClient(context: Context, private val sendSignal: (JSONObject) ->
         override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
             when (state) {
-                PeerConnection.IceConnectionState.CONNECTED, PeerConnection.IceConnectionState.COMPLETED -> _state.value = "streaming"
+                PeerConnection.IceConnectionState.CONNECTED, PeerConnection.IceConnectionState.COMPLETED -> {
+                    _state.value = "streaming"
+                    startStats()
+                }
                 PeerConnection.IceConnectionState.FAILED -> {
                     _problem.value = "The phone could not reach the computer for the stream."
                     _state.value = "closed"
@@ -172,9 +203,60 @@ class GameStreamClient(context: Context, private val sendSignal: (JSONObject) ->
         }
         override fun onRenegotiationNeeded() {}
         override fun onAddTrack(receiver: RtpReceiver?, streams: Array<out MediaStream>?) {
+            // show each picture as soon as it is decoded: the buffer may not be held for smoothness, a game wants the newest frame
+            try { receiver?.setJitterBufferMinimumDelay(0.0) } catch (_: Throwable) {}
             (receiver?.track() as? VideoTrack)?.let {
                 it.setEnabled(true)
                 _video.value = it
+            }
+        }
+    }
+
+    /** Once a second: read libwebrtc's numbers and keep the averages of the last second. */
+    private fun startStats() {
+        if (statsJob?.isActive == true) return
+        statsJob = statsScope.launch {
+            var lastJitter = 0.0; var lastEmitted = 0.0; var lastDecode = 0.0; var lastDecoded = 0.0
+            var lastBytes = 0.0; var lastLost = 0.0; var lastRecv = 0.0
+            while (isActive) {
+                delay(1000)
+                val connection = pc ?: continue
+                connection.getStats { report: RTCStatsReport ->
+                    fun num(v: Any?): Double = (v as? Number)?.toDouble() ?: 0.0
+                    var inbound: Map<String, Any>? = null
+                    var pair: Map<String, Any>? = null
+                    val locals = HashMap<String, String>()
+                    for (st in report.statsMap.values) {
+                        val m = st.members
+                        when (st.type) {
+                            "inbound-rtp" -> if (m["kind"] == "video") inbound = m
+                            "candidate-pair" -> if (m["nominated"] == true || m["state"] == "succeeded") pair = m
+                            "local-candidate" -> locals[st.id] = (m["candidateType"] as? String) ?: ""
+                        }
+                    }
+                    val i = inbound ?: return@getStats
+                    val jitter = num(i["jitterBufferDelay"]); val emitted = num(i["jitterBufferEmittedCount"])
+                    val decode = num(i["totalDecodeTime"]); val decoded = num(i["framesDecoded"])
+                    val bytes = num(i["bytesReceived"]); val lost = num(i["packetsLost"]); val recv = num(i["packetsReceived"])
+                    val buffer = if (emitted > lastEmitted) (jitter - lastJitter) / (emitted - lastEmitted) * 1000 else 0.0
+                    val dec = if (decoded > lastDecoded) (decode - lastDecode) / (decoded - lastDecoded) * 1000 else 0.0
+                    val lostPct = if (recv > lastRecv) (lost - lastLost) / ((recv - lastRecv) + (lost - lastLost)).coerceAtLeast(1.0) * 100 else 0.0
+                    val kbps = ((bytes - lastBytes) * 8 / 1000).toInt()
+                    lastJitter = jitter; lastEmitted = emitted; lastDecode = decode; lastDecoded = decoded
+                    lastBytes = bytes; lastLost = lost; lastRecv = recv
+                    val kind = pair?.get("localCandidateId")?.let { locals[it as String] } ?: ""
+                    val s = StreamStats(
+                        fps = num(i["framesPerSecond"]).toInt(),
+                        bufferMs = buffer.toInt(),
+                        decodeMs = dec.toInt(),
+                        rttMs = (num(pair?.get("currentRoundTripTime")) * 1000).toInt(),
+                        lostPercent = lostPct,
+                        kbps = kbps,
+                        path = if (kind == "relay") "relay" else if (kind.isNotEmpty()) "direct" else "",
+                    )
+                    _stats.value = s
+                    android.util.Log.i("ZLStream", "fps=${s.fps} buffer=${s.bufferMs}ms decode=${s.decodeMs}ms rtt=${s.rttMs}ms lost=${"%.1f".format(s.lostPercent)}% ${s.kbps}kbps ${s.path}")
+                }
             }
         }
     }

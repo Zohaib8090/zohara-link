@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -65,6 +66,8 @@ fun GameStreamScreen(
     val video by client.video.collectAsState()
     val state by client.state.collectAsState()
     val problem by client.problem.collectAsState()
+    val stats by client.stats.collectAsState()
+    var showStats by remember { mutableStateOf(true) }
     var showPad by remember { mutableStateOf(true) }
     var showTouchpad by remember { mutableStateOf(false) }
 
@@ -112,6 +115,16 @@ fun GameStreamScreen(
         }
         if (showPad) {
             GamepadControls(Modifier, computerName, connected, onGamepadState, onClose = { showPad = false })
+        }
+
+        // the real numbers behind any delay: tap them to hide
+        if (showStats && state == "streaming") {
+            Text(
+                "${stats.fps} fps · wait ${stats.bufferMs} ms · decode ${stats.decodeMs} ms · trip ${stats.rttMs} ms · lost ${"%.1f".format(stats.lostPercent)}% · ${stats.kbps / 1000.0} Mb/s" +
+                    (if (stats.path.isNotEmpty()) " · ${stats.path}" else ""),
+                color = Color(0xFF9AA6B5), fontSize = 10.sp,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 2.dp).background(Color(0x99000000)).clickable { showStats = false }.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
         }
 
         Row(

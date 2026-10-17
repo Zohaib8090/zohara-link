@@ -65,7 +65,7 @@ pub fn encoder_candidates(o: &Options, nvidia_awake: bool) -> Vec<(&'static str,
     );
     let x264 = (
         "x264enc",
-        format!("x264enc tune=zerolatency speed-preset=ultrafast bitrate={b} key-int-max={gop} bframes=0 ! video/x-h264,profile=baseline"),
+        format!("x264enc tune=zerolatency speed-preset=ultrafast sliced-threads=true bitrate={b} key-int-max={gop} bframes=0 ! video/x-h264,profile=baseline"),
     );
     // The Intel chip first: it does not wake the NVIDIA chip. When the NVIDIA chip is awake (a game runs on it), NVENC is fine.
     if nvidia_awake { vec![nv, va, x264] } else { vec![va, nv, x264] }
@@ -89,13 +89,13 @@ pub fn pipeline_description(o: &Options, nvidia_awake: bool, have: &dyn Fn(&str)
         .into_iter()
         .find(|(n, _)| have(n))
         .ok_or("No H.264 encoder is installed (install gst-plugin-va, or gst-plugins-ugly for x264).")?;
-    let _ = name;
+    eprintln!("encoder: {name}");
     let source = match &o.source {
         Source::Test => "videotestsrc is-live=true pattern=ball".to_string(),
         Source::PipeWire { fd, node } => format!("pipewiresrc fd={fd} path={node} do-timestamp=true always-copy=true"),
     };
     Ok(format!(
-        "{source} ! queue max-size-buffers=2 leaky=downstream ! videoconvert ! videoscale ! videorate \
+        "{source} ! queue max-size-buffers=1 max-size-bytes=0 max-size-time=0 leaky=downstream ! videoconvert ! videoscale ! videorate \
          ! video/x-raw,width={w},height={h},framerate={fps}/1 ! {enc} ! h264parse config-interval=-1 \
          ! rtph264pay config-interval=-1 aggregate-mode=zero-latency pt=96 \
          ! application/x-rtp,media=video,encoding-name=H264,payload=96,clock-rate=90000 ! w. \
