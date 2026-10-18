@@ -1,7 +1,7 @@
 # Zohara Link: instructions for Claude
 
 Zohara Link connects an Android phone to a Zohara OS computer: shared clipboard, files, phone notifications, mouse and media
-control. Read this, then `GOTCHA.md` (traps that already cost time), `docs/SECURITY.md`, `docs/ANDROID.md`, `docs/INPUT.md` (mouse, keyboard, controller) and `docs/STREAMING.md` (the live game stream: design, status, traps). The owner's working
+control. Read this, then `GOTCHA.md` (traps that already cost time), `docs/SECURITY.md`, `docs/ANDROID.md`, `docs/INPUT.md` (mouse, keyboard, controller), `docs/STREAMING.md` (the live game stream: design, status, traps, delay numbers) and `docs/FILES.md` (files both ways, folders, the clipboard option). The owner's working
 agreement for all Zohara repos is `docs/HOW-THE-OWNER-WORKS.md` in the `zohara` repo: read it too.
 
 ## What is where
