@@ -80,3 +80,11 @@ The Android changes are **not compiled or run yet** (no Android toolchain in the
   self-update. CI builds the app; nobody has run it.
 * The app's self-update trusts Android's own check that the new APK has the same signing key as the installed app. Whoever holds the
   signing key can push an update to every phone: keep the key in GitHub secrets and two offline copies, never in git.
+
+
+## ZoAI (2026-11-08)
+
+A phone can talk to ZO-AI on the computer (`docs/ZOAI.md`). That is the strongest thing a phone can do here: ZO-AI runs commands and changes
+files as the person. Controls: per-phone switch **Use ZO-AI** (off by default, set only on the computer), checked on every line, a fixed list of
+requests, **Bypass cannot be chosen from a phone**, and ZO-AI's own questions are answered on the phone (three minutes, then no). Not covered:
+a phone that is allowed and unlocked in someone else's hands can ask ZO-AI for anything it may do in Auto or Manual mode, and answer its questions.

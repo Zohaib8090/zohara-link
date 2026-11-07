@@ -24,6 +24,10 @@ pub struct PairedDevice {
     /// May this phone watch the computer's screen? Off until allowed per phone (Settings > Zohara Link).
     #[serde(default)]
     pub allow_screen: bool,
+    /// May this phone talk to ZO-AI on the computer, which can run commands and change anything the person can? Off until allowed
+    /// per phone (Settings > Zohara Link).
+    #[serde(default)]
+    pub allow_zoai: bool,
 }
 
 pub struct FileTransfer {

@@ -481,6 +481,7 @@ class EcosystemViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     val streamMessages get() = socketEngine.streamMessages
+    val zoaiMessages get() = socketEngine.zoaiMessages
     fun sendRaw(o: org.json.JSONObject) = socketEngine.sendRaw(o)
 
     val screenFrame get() = socketEngine.screenFrame

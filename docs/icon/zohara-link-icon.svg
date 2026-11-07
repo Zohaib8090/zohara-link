@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="108" height="108">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#141A24"/><stop offset="1" stop-color="#0B0E14"/></linearGradient>
+<radialGradient id="glow" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#5FD4D4" stop-opacity="0.18"/><stop offset="1" stop-color="#5FD4D4" stop-opacity="0"/></radialGradient>
+<clipPath id="top"><rect x="0" y="0" width="108" height="54"/></clipPath>
+</defs>
+<rect width="108" height="108" fill="url(#bg)"/>
+<circle cx="54" cy="54" r="46" fill="url(#glow)"/>
+<g>
+  <path d="M34.50,39.00 h14.00 a8,8 0 0 1 8,8 v14.00 a8,8 0 0 1 -8,8 h-14.00 a8,8 0 0 1 -8,-8 v-14.00 a8,8 0 0 1 8,-8 z" fill="none" stroke="#E8ECF1" stroke-width="6" stroke-linejoin="round" transform="rotate(45 41.5 54)"/>
+  <path d="M59.50,39.00 h14.00 a8,8 0 0 1 8,8 v14.00 a8,8 0 0 1 -8,8 h-14.00 a8,8 0 0 1 -8,-8 v-14.00 a8,8 0 0 1 8,-8 z" fill="none" stroke="#5FD4D4" stroke-width="6" stroke-linejoin="round" transform="rotate(45 66.5 54)"/>
+  <g clip-path="url(#top)"><path d="M34.50,39.00 h14.00 a8,8 0 0 1 8,8 v14.00 a8,8 0 0 1 -8,8 h-14.00 a8,8 0 0 1 -8,-8 v-14.00 a8,8 0 0 1 8,-8 z" fill="none" stroke="#E8ECF1" stroke-width="6" stroke-linejoin="round" transform="rotate(45 41.5 54)"/></g>
+</g>
+</svg>

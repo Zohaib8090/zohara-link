@@ -1,8 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item
-        android:width="66dp"
-        android:height="66dp"
-        android:drawable="@drawable/zohara_link_icon_1787932317084"
-        android:gravity="center" />
-</layer-list>
+<!-- Zohara Link mark: two linked rounded squares (the computer and the phone), in the Zohara diamond language. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+        <group android:rotation="45" android:pivotX="41.5" android:pivotY="54">
+            <path android:pathData="M34.50,39.00 h14.00 a8,8 0 0 1 8,8 v14.00 a8,8 0 0 1 -8,8 h-14.00 a8,8 0 0 1 -8,-8 v-14.00 a8,8 0 0 1 8,-8 z" android:strokeColor="#FFE8ECF1" android:strokeWidth="6" android:strokeLineJoin="round" />
+        </group>
+        <group android:rotation="45" android:pivotX="66.5" android:pivotY="54">
+            <path android:pathData="M59.50,39.00 h14.00 a8,8 0 0 1 8,8 v14.00 a8,8 0 0 1 -8,8 h-14.00 a8,8 0 0 1 -8,-8 v-14.00 a8,8 0 0 1 8,-8 z" android:strokeColor="#FF5FD4D4" android:strokeWidth="6" android:strokeLineJoin="round" />
+        </group>
+    <group>
+        <clip-path android:pathData="M0,0h108v54h-108z" />
+        <group android:rotation="45" android:pivotX="41.5" android:pivotY="54">
+            <path android:pathData="M34.50,39.00 h14.00 a8,8 0 0 1 8,8 v14.00 a8,8 0 0 1 -8,8 h-14.00 a8,8 0 0 1 -8,-8 v-14.00 a8,8 0 0 1 8,-8 z" android:strokeColor="#FFE8ECF1" android:strokeWidth="6" android:strokeLineJoin="round" />
+        </group>
+    </group>
+</vector>

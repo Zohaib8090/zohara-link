@@ -20,6 +20,7 @@ mod remote;
 mod screen;
 mod tls;
 mod uinput;
+mod zoai;
 
 use clap::Parser;
 

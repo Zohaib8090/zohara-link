@@ -73,6 +73,8 @@ fun ZlApp(vm: EcosystemViewModel) {
     val snackbar = remember { SnackbarHostState() }
 
     // The live game stream (WebRTC): made once, fed with the computer's signalling for as long as the app is open.
+    // ZoAI: chat with ZO-AI on the computer (one controller for the whole run, so a conversation survives switching tabs)
+    val zoai = remember { ZoAiController { vm.sendRaw(it) } }
     val streamClient = remember { com.example.network.GameStreamClient(context.applicationContext) { vm.sendRaw(it) } }
     androidx.compose.runtime.LaunchedEffect(Unit) {
         vm.streamMessages.collect { streamClient.onSignal(it) }
@@ -346,6 +348,12 @@ fun ZlApp(vm: EcosystemViewModel) {
                                 onAlerts = { vm.setAlertsEnabled(it) },
                                 updateText = update?.let { if (updating) updateLine else "Version ${it.versionName} (you have ${installedBuild.second})" },
                                 onUpdate = { startUpdate() },
+                            )
+                            ZlScreen.ZOAI -> ZoAiScreen(
+                                computerName = computerName,
+                                connected = connected,
+                                controller = zoai,
+                                packets = vm.zoaiMessages,
                             )
                             ZlScreen.FILES -> FilesScreen(
                                 computerName = computerName,

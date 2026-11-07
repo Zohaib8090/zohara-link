@@ -80,6 +80,10 @@ class TlsSocketEngine(private val context: Context) {
     private val _streamMessages = kotlinx.coroutines.flow.MutableSharedFlow<JSONObject>(extraBufferCapacity = 128)
     val streamMessages: kotlinx.coroutines.flow.SharedFlow<JSONObject> = _streamMessages
 
+    /** What ZO-AI on the computer sends back (ZOAI_EVT, ZOAI_END): the ZoAI tab reads these. */
+    private val _zoaiMessages = kotlinx.coroutines.flow.MutableSharedFlow<JSONObject>(extraBufferCapacity = 256)
+    val zoaiMessages: kotlinx.coroutines.flow.SharedFlow<JSONObject> = _zoaiMessages
+
     /** A file the computer wants to send to this phone, waiting for the person's yes or no. */
     data class FileOffer(val transferId: String, val name: String, val size: Long)
 
@@ -430,6 +434,9 @@ class TlsSocketEngine(private val context: Context) {
             }
             ProtocolTypes.STREAM_OFFER, ProtocolTypes.STREAM_ICE, ProtocolTypes.STREAM_STATE, ProtocolTypes.STREAM_ERROR -> {
                 _streamMessages.tryEmit(json)
+            }
+            "ZOAI_EVT", "ZOAI_END" -> {
+                _zoaiMessages.tryEmit(json)
             }
             ProtocolTypes.SCREEN_STOPPED -> {
                 _screenFrame.value = null

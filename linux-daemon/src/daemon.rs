@@ -1,5 +1,5 @@
 use crate::protocol::{FileTransfer, PairedDevice};
-use crate::{auth, desktop, limits, mdns, remote, screen, tls, uinput};
+use crate::{auth, desktop, limits, mdns, remote, screen, tls, uinput, zoai};
 use anyhow::{Context, Result};
 use rand::Rng;
 use serde_json::{json, Value};
@@ -131,6 +131,8 @@ pub struct Daemon {
     screen_streams: TokioMutex<HashMap<String, tokio::task::JoinHandle<()>>>,
     /// Live game streams (the `zohara-linkd-stream` program), one per connection. See docs/STREAMING.md.
     live_streams: TokioMutex<HashMap<String, LiveStream>>,
+    /// Open ZO-AI requests from phones ("connection|request id"): lines the phone sends (an approval, stop) go to the ZO-AI socket.
+    zoai_sessions: Arc<TokioMutex<HashMap<String, tokio::sync::mpsc::UnboundedSender<String>>>>,
 }
 
 /// The stream program of one connection: where commands are written, and the task that owns the process and reads what it says.
@@ -212,6 +214,7 @@ impl Daemon {
             ipc_broadcast,
             screen_streams: TokioMutex::new(HashMap::new()),
             live_streams: TokioMutex::new(HashMap::new()),
+            zoai_sessions: Arc::new(TokioMutex::new(HashMap::new())),
         }))
     }
 
@@ -356,6 +359,9 @@ impl Daemon {
         });
         self.stop_screen(&device_id).await;
         self.stop_live_stream(&device_id).await;
+        // ZO-AI work the phone started stops with its connection
+        let prefix = format!("{device_id}|");
+        self.zoai_sessions.lock().await.retain(|k, _| !k.starts_with(&prefix));
         // a phone that vanished while holding a key, a button or the controller must not leave them stuck down
         uinput::release_all();
         self.active_connections.lock().await.remove(&device_id);
@@ -407,6 +413,8 @@ impl Daemon {
                     let _ = send_json(writer, &json!({"type": "ERROR", "error": "remote input is not allowed for this phone"})).await;
                 }
             }
+            "ZOAI_REQ" => self.handle_zoai_req(device_id, &packet, writer).await,
+            "ZOAI_LINE" => self.handle_zoai_line(device_id, &packet).await,
             "SCREEN_START" => self.handle_screen_start(device_id, &packet, writer).await,
             "STREAM_START" => self.handle_stream_start(device_id, &packet, writer).await,
             "STREAM_ANSWER" => {
@@ -547,6 +555,7 @@ impl Daemon {
                 token_hash: auth::token_hash(&token),
                 allow_input: false,
                 allow_screen: false,
+                allow_zoai: false,
             };
             self.paired_devices
                 .lock()
@@ -630,6 +639,114 @@ impl Daemon {
 
     fn paired_devices_handle(&self) -> Arc<TokioMutex<HashMap<String, PairedDevice>>> {
         self.paired_devices.clone()
+    }
+
+    /// A phone asks ZO-AI on the computer something (chat, models, MCP servers…). Needs the ZO-AI permission for that phone, which is
+    /// checked again for every line that comes back, so taking it away in Settings ends the work at once.
+    async fn handle_zoai_req(&self, connection: &str, packet: &Value, writer: &SharedWriter) {
+        let rid: String = packet.get("rid").and_then(Value::as_str).unwrap_or("").chars().take(64).collect();
+        if rid.is_empty() {
+            return;
+        }
+        let end = |why: &str| json!({"type": "ZOAI_END", "rid": rid, "error": why});
+        let dev = self.device_of(connection).await;
+        if !self.paired_devices.lock().await.get(&dev).map(|d| d.allow_zoai).unwrap_or(false) {
+            let _ = send_json(writer, &end("Controlling ZO-AI is not allowed for this phone. Allow it on the computer: Settings > Zohara Link.")).await;
+            return;
+        }
+        let req = match zoai::clean_request(packet) {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = send_json(writer, &end(&e)).await;
+                return;
+            }
+        };
+        let key = format!("{connection}|{rid}");
+        let prefix = format!("{connection}|");
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        {
+            let mut sessions = self.zoai_sessions.lock().await;
+            if sessions.len() >= limits::MAX_ZOAI_SESSIONS || sessions.keys().filter(|k| k.starts_with(&prefix)).count() >= 6 {
+                drop(sessions);
+                let _ = send_json(writer, &end("Too many ZO-AI requests at once.")).await;
+                return;
+            }
+            sessions.insert(key.clone(), tx);
+        }
+        let socket = zoai::socket_path();
+        let (writer, paired, rid2) = (writer.clone(), self.paired_devices_handle(), rid.clone());
+        let this = self.zoai_sessions.clone();
+        tokio::spawn(async move {
+            let result: Result<(), String> = async {
+                let stream = UnixStream::connect(&socket).await.map_err(|_| "ZO-AI is not running on the computer. Start it there (zo-ai --background) and try again.".to_string())?;
+                let (read, mut write) = stream.into_split();
+                write.write_all(format!("{req}\n").as_bytes()).await.map_err(|e| e.to_string())?;
+                // a task reads ZO-AI's lines, so waiting on "a line from ZO-AI or a line from the phone" never cuts a read in half
+                let (line_tx, mut line_rx) = tokio::sync::mpsc::channel::<Option<String>>(64);
+                let reader = tokio::spawn(async move {
+                    let mut lines = BufReader::new(read);
+                    loop {
+                        match limits::read_line_bounded(&mut lines, 4 * 1024 * 1024).await {
+                            Ok(Some(l)) => {
+                                if line_tx.send(Some(l)).await.is_err() {
+                                    return;
+                                }
+                            }
+                            _ => {
+                                let _ = line_tx.send(None).await;
+                                return;
+                            }
+                        }
+                    }
+                });
+                let outcome: Result<(), String> = loop {
+                    tokio::select! {
+                        next = line_rx.recv() => {
+                            match next {
+                                Some(Some(l)) => {
+                                    if !paired.lock().await.get(&dev).map(|d| d.allow_zoai).unwrap_or(false) {
+                                        break Err("Controlling ZO-AI was switched off for this phone.".into());
+                                    }
+                                    let Ok(data) = serde_json::from_str::<Value>(l.trim()) else { continue };
+                                    if send_json(&writer, &json!({"type": "ZOAI_EVT", "rid": rid2, "data": data})).await.is_err() {
+                                        break Ok(());
+                                    }
+                                }
+                                _ => break Ok(()),
+                            }
+                        }
+                        out = rx.recv() => {
+                            match out {
+                                Some(l) => {
+                                    if let Err(e) = write.write_all(format!("{l}\n").as_bytes()).await {
+                                        break Err(e.to_string());
+                                    }
+                                }
+                                // the phone's connection ended: closing our side tells ZO-AI to stop
+                                None => break Ok(()),
+                            }
+                        }
+                    }
+                };
+                reader.abort();
+                outcome
+            }
+            .await;
+            this.lock().await.remove(&key);
+            let _ = send_json(&writer, &match result {
+                Ok(()) => json!({"type": "ZOAI_END", "rid": rid2}),
+                Err(e) => json!({"type": "ZOAI_END", "rid": rid2, "error": e}),
+            }).await;
+        });
+    }
+
+    /// An approval answer or "stop" from the phone for a request that is running.
+    async fn handle_zoai_line(&self, connection: &str, packet: &Value) {
+        let rid = packet.get("rid").and_then(Value::as_str).unwrap_or("");
+        let Some(line) = zoai::clean_line(packet) else { return };
+        if let Some(tx) = self.zoai_sessions.lock().await.get(&format!("{connection}|{rid}")) {
+            let _ = tx.send(line);
+        }
     }
 
     async fn device_of(&self, connection: &str) -> String {
@@ -1178,10 +1295,14 @@ impl Daemon {
                 let id = req.get("deviceId").and_then(Value::as_str).unwrap_or("");
                 let input = req.get("input").and_then(Value::as_bool);
                 let screen = req.get("screen").and_then(Value::as_bool);
+                let zoai = req.get("zoai").and_then(Value::as_bool);
                 let found = {
                     let mut devices = self.paired_devices.lock().await;
                     match devices.get_mut(id) {
-                        Some(d) if input.is_some() || screen.is_some() => {
+                        Some(d) if input.is_some() || screen.is_some() || zoai.is_some() => {
+                            if let Some(v) = zoai {
+                                d.allow_zoai = v;
+                            }
                             if let Some(v) = input {
                                 d.allow_input = v;
                             }

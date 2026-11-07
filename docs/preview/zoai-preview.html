@@ -1,0 +1,161 @@
+<!doctype html><meta charset="utf-8"><title>ZoAI tab preview</title>
+<style>
+:root{--bg:#0B0E14;--card:#141A24;--cardAlt:#101620;--line:#232C3A;--text:#E8ECF1;--muted:#9AA6B5;--accent:#5FD4D4;--accentInk:#06181A;--accentSoft:#16303A;--ok:#7BE0A8;--danger:#FFB4AB;--dangerBg:#2A1719;--bar:#0F141C}
+*{box-sizing:border-box;margin:0}
+body{background:#05070b;color:var(--text);font-family:Roboto,"Noto Sans",system-ui,sans-serif;padding:36px 28px 28px;display:flex;flex-wrap:wrap;gap:34px;justify-content:center}
+h1{width:100%;text-align:center;font-size:15px;font-weight:500;color:var(--muted)}
+h1 b{color:var(--accent)}
+.col{display:flex;flex-direction:column;align-items:center;gap:12px}
+.cap{font-size:13px;color:var(--muted)}
+.phone{width:360px;height:740px;border-radius:38px;background:var(--bg);border:9px solid #1b212c;position:relative;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 20px 60px #000a}
+.status{height:28px;padding:8px 22px 0;font-size:11px;color:var(--muted);display:flex;justify-content:space-between}
+.top{display:flex;align-items:center;padding:6px 8px}
+.ib{width:44px;height:44px;border-radius:22px;display:flex;align-items:center;justify-content:center;color:var(--text)}
+.ib svg{width:24px;height:24px;fill:currentColor}
+.title{flex:1;font-size:17px;font-weight:600;padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sub{font-size:12px;color:var(--muted);padding:0 20px 8px}
+.msgs{flex:1;overflow:hidden;padding:8px 14px;display:flex;flex-direction:column;gap:8px}
+.user{align-self:flex-end;max-width:300px;background:var(--accentSoft);border-radius:18px;padding:10px 14px;font-size:15px}
+.ai{font-size:15px;line-height:22px;padding:0 4px}
+.tool{font-family:"Roboto Mono",monospace;font-size:12px;color:var(--accent);background:var(--cardAlt);border-radius:8px;padding:8px}
+.out{font-family:"Roboto Mono",monospace;font-size:12px;color:var(--muted);padding:0 8px;white-space:pre-wrap}
+.err{font-size:13px;color:var(--danger);background:var(--dangerBg);border-radius:8px;padding:10px}
+.input{display:flex;align-items:flex-end;padding:10px;gap:8px}
+.field{flex:1;border:1px solid #3a4658;border-radius:20px;padding:14px 16px;color:var(--muted);font-size:15px;min-height:56px}
+.send{width:52px;height:52px;border-radius:26px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:var(--accentInk)}
+.send.stop{background:var(--dangerBg);color:var(--danger)}
+.send svg{width:24px;height:24px;fill:currentColor}
+.nav{height:70px;background:var(--bar);display:flex;justify-content:space-around;align-items:center;padding-top:4px}
+.ni{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:12px;font-weight:600;color:var(--muted)}
+.ni .pill{width:56px;height:30px;border-radius:15px;display:flex;align-items:center;justify-content:center}
+.ni svg{width:22px;height:22px;fill:currentColor}
+.ni.on{color:var(--accent)}.ni.on .pill{background:var(--accentSoft)}
+.empty{margin:auto;padding:32px;text-align:center}
+.empty b{display:block;color:var(--accent);font-size:28px;margin-bottom:8px}
+.empty span{color:var(--muted);font-size:14px;line-height:20px}
+.dim{position:absolute;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;padding:28px}
+.dlg{background:var(--card);border-radius:28px;padding:24px;width:100%}
+.dlg h3{font-size:20px;font-weight:400;margin-bottom:14px}
+.dlg pre{font-family:"Roboto Mono",monospace;font-size:13px;color:var(--muted);white-space:pre-wrap;margin-bottom:18px}
+.dlg .btns{display:flex;justify-content:flex-end;gap:6px;font-size:14px;font-weight:500}
+.dlg .btns span{padding:10px 12px}
+.row{display:flex;align-items:center;background:var(--card);border-radius:14px;padding:6px 14px;margin:0 12px 8px;font-size:15px}
+.row .t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.crd{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px;margin:0 14px 12px}
+.crd h4{font-size:15px;font-weight:600;margin-bottom:4px}.crd p{font-size:13px;color:var(--muted);line-height:18px}
+.seg{display:flex;gap:8px;margin-top:10px}.seg span{padding:10px 16px;border-radius:12px;background:var(--cardAlt);font-size:14px}.seg .on{background:var(--accent);color:var(--accentInk)}
+.model{font-size:14px;padding:9px 0}.model.on{color:var(--accent)}
+.sv{display:flex;align-items:center;margin-top:10px;gap:10px}.sv .n{flex:1}.sv small{display:block;color:var(--muted);font-size:11px}
+.sw{width:50px;height:30px;border-radius:15px;background:var(--accent);position:relative}.sw::after{content:"";position:absolute;right:4px;top:4px;width:22px;height:22px;border-radius:11px;background:var(--accentInk)}
+.fld{border:1px solid #3a4658;border-radius:6px;padding:14px;color:var(--muted);font-size:15px;margin-top:10px}
+.link{color:var(--accent);font-size:14px;font-weight:500;padding:10px 0 0}
+.scroll{flex:1;overflow:hidden}
+.home{background:linear-gradient(160deg,#16303a,#0b0e14 60%);}
+.apps{display:grid;grid-template-columns:repeat(4,1fr);gap:22px 10px;padding:60px 18px;text-align:center;font-size:11px;color:var(--text)}
+.apps div{display:flex;flex-direction:column;align-items:center;gap:6px}
+.apps .ic{width:60px;height:60px;border-radius:50%;background:#1b2330}
+.apps img{width:60px;height:60px;border-radius:50%}
+.sq img{border-radius:18px}
+</style>
+<h1>Zohara Link, <b>ZoAI</b> tab: a preview drawn from the app's own code (colours, sizes and layout of <code>ZlZoAi.kt</code>), not a screenshot of the compiled app</h1>
+
+<!-- icons -->
+<svg width="0" height="0" style="position:absolute"><defs>
+<symbol id="menu" viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></symbol>
+<symbol id="add" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></symbol>
+<symbol id="gear" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.48.48 0 00-.59.22L2.74 8.87a.47.47 0 00.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1112 8.4a3.6 3.6 0 010 7.2z"/></symbol>
+<symbol id="up" viewBox="0 0 24 24"><path d="M4 12l1.41 1.41L11 7.83V20h2V7.83l5.58 5.59L20 12l-8-8-8 8z"/></symbol>
+<symbol id="x" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+<symbol id="del" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></symbol>
+<symbol id="home" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></symbol>
+<symbol id="folder" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></symbol>
+<symbol id="pc" viewBox="0 0 24 24"><path d="M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z"/></symbol>
+<symbol id="spark" viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></symbol>
+<symbol id="shield" viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/></symbol>
+</defs></svg>
+
+<!-- 1: empty -->
+<div class="col"><div class="phone">
+<div class="status"><span>9:41</span><span>●●● 5G</span></div>
+<div class="top"><div class="ib"><svg><use href="#menu"/></svg></div><div class="title">New chat</div><div class="ib"><svg><use href="#add"/></svg></div><div class="ib"><svg><use href="#gear"/></svg></div></div>
+<div class="sub">google/gemini-2.5-flash · Auto · Zohaib-Baig</div>
+<div class="msgs"><div class="empty"><b>ZoAI</b><span>Ask ZO-AI on Zohaib-Baig to do something. It uses the computer's model, files, terminal, browser and MCP servers.</span></div></div>
+<div class="input"><div class="field">Message ZO-AI</div><div class="send"><svg><use href="#up"/></svg></div></div>
+<div class="nav"><div class="ni"><div class="pill"><svg><use href="#home"/></svg></div>Home</div><div class="ni"><div class="pill"><svg><use href="#folder"/></svg></div>Files</div><div class="ni"><div class="pill"><svg><use href="#pc"/></svg></div>Remote</div><div class="ni on"><div class="pill"><svg><use href="#spark"/></svg></div>ZoAI</div><div class="ni"><div class="pill"><svg><use href="#shield"/></svg></div>Access</div></div>
+</div><div class="cap">The ZoAI tab, new chat</div></div>
+
+<!-- 2: conversation -->
+<div class="col"><div class="phone">
+<div class="status"><span>9:42</span><span>●●● 5G</span></div>
+<div class="top"><div class="ib"><svg><use href="#menu"/></svg></div><div class="title">open a terminal and check disk</div><div class="ib"><svg><use href="#add"/></svg></div><div class="ib"><svg><use href="#gear"/></svg></div></div>
+<div class="sub">google/gemini-2.5-flash · Auto · Zohaib-Baig</div>
+<div class="msgs">
+<div class="user">Open a terminal on my laptop and tell me how full the disk is</div>
+<div class="ai">Let me open a terminal and check.</div>
+<div class="tool">▸ zohara_term_open  name: disk</div>
+<div class="out">✓ Opened terminal 1 ("disk"). It is shown in the ZO-AI window.</div>
+<div class="tool">▸ zohara_term_run  cmd: df -h /</div>
+<div class="out">✓ [terminal 1]
+Filesystem  Size  Used Avail Use%
+/dev/nvme0n1p2 477G 429G 24G 95% /</div>
+<div class="ai">Your disk is <b>95% full</b>: 429 GB used, 24 GB free. I can look for the biggest folders if you like.</div>
+</div>
+<div class="input"><div class="field">Message ZO-AI</div><div class="send"><svg><use href="#up"/></svg></div></div>
+<div class="nav"><div class="ni"><div class="pill"><svg><use href="#home"/></svg></div>Home</div><div class="ni"><div class="pill"><svg><use href="#folder"/></svg></div>Files</div><div class="ni"><div class="pill"><svg><use href="#pc"/></svg></div>Remote</div><div class="ni on"><div class="pill"><svg><use href="#spark"/></svg></div>ZoAI</div><div class="ni"><div class="pill"><svg><use href="#shield"/></svg></div>Access</div></div>
+</div><div class="cap">A conversation: the laptop's terminal driven from the phone</div></div>
+
+<!-- 3: approval -->
+<div class="col"><div class="phone">
+<div class="status"><span>9:43</span><span>●●● 5G</span></div>
+<div class="top"><div class="ib"><svg><use href="#menu"/></svg></div><div class="title">clean up downloads</div><div class="ib"><svg><use href="#add"/></svg></div><div class="ib"><svg><use href="#gear"/></svg></div></div>
+<div class="sub">google/gemini-2.5-flash · Auto · Zohaib-Baig</div>
+<div class="msgs">
+<div class="user">Delete the old zip files in Downloads</div>
+<div class="ai">I'll list them first, then remove the ones older than a month.</div>
+<div class="tool">▸ zohara_shell  cmd: find ~/Downloads -name '*.zip' -mtime +30 -delete</div>
+</div>
+<div class="input"><div class="field">Message ZO-AI</div><div class="send stop"><svg><use href="#x"/></svg></div></div>
+<div class="nav"><div class="ni"><div class="pill"><svg><use href="#home"/></svg></div>Home</div><div class="ni"><div class="pill"><svg><use href="#folder"/></svg></div>Files</div><div class="ni"><div class="pill"><svg><use href="#pc"/></svg></div>Remote</div><div class="ni on"><div class="pill"><svg><use href="#spark"/></svg></div>ZoAI</div><div class="ni"><div class="pill"><svg><use href="#shield"/></svg></div>Access</div></div>
+<div class="dim"><div class="dlg"><h3>Let ZO-AI do this?</h3><pre>zohara_shell
+cmd: find ~/Downloads -name '*.zip' -mtime +30 -delete</pre><div class="btns"><span style="color:var(--muted)">Don't allow</span><span style="color:var(--accent)">Allow once</span></div></div></div>
+</div><div class="cap">ZO-AI asks before it changes anything</div></div>
+
+<!-- 4: chats -->
+<div class="col"><div class="phone">
+<div class="status"><span>9:44</span><span>●●● 5G</span></div>
+<div class="top"><div class="ib"><svg><use href="#x"/></svg></div><div class="title">Chats</div><div class="ib"><svg><use href="#add"/></svg></div></div>
+<div class="scroll" style="padding-top:8px">
+<div class="row"><div class="t">open a terminal and check disk</div><div class="ib"><svg><use href="#del"/></svg></div></div>
+<div class="row"><div class="t">clean up downloads</div><div class="ib"><svg><use href="#del"/></svg></div></div>
+<div class="row"><div class="t">see current song in spotify</div><div class="ib"><svg><use href="#del"/></svg></div></div>
+<div class="row"><div class="t">install this mcp https://…</div><div class="ib"><svg><use href="#del"/></svg></div></div>
+<div class="row"><div class="t">take ss and tell me what is open</div><div class="ib"><svg><use href="#del"/></svg></div></div>
+<div class="row"><div class="t">schedule a backup every Sunday</div><div class="ib"><svg><use href="#del"/></svg></div></div>
+</div>
+<div class="nav"><div class="ni"><div class="pill"><svg><use href="#home"/></svg></div>Home</div><div class="ni"><div class="pill"><svg><use href="#folder"/></svg></div>Files</div><div class="ni"><div class="pill"><svg><use href="#pc"/></svg></div>Remote</div><div class="ni on"><div class="pill"><svg><use href="#spark"/></svg></div>ZoAI</div><div class="ni"><div class="pill"><svg><use href="#shield"/></svg></div>Access</div></div>
+</div><div class="cap">Chat history (shared with the app on the laptop)</div></div>
+
+<!-- 5: settings -->
+<div class="col"><div class="phone">
+<div class="status"><span>9:45</span><span>●●● 5G</span></div>
+<div class="top"><div class="ib"><svg><use href="#x"/></svg></div><div class="title">ZoAI settings</div></div>
+<div class="scroll">
+<div class="crd"><h4>Ask before acting</h4><p>Auto runs safe things and asks for the rest. Manual asks before every change. Skipping the questions (Bypass) can only be switched on at the computer.</p><div class="seg"><span class="on">Auto</span><span>Manual</span></div></div>
+<div class="crd"><h4>Model</h4><p>openrouter: google/gemini-2.5-flash</p><div class="model on">google/gemini-2.5-flash</div><div class="model">anthropic/claude-sonnet-5.5</div><div class="model">deepseek/deepseek-chat</div></div>
+<div class="crd"><h4>MCP servers</h4><p>Tools you give ZO-AI on the computer. They are added there, so the computer needs to be on.</p>
+<div class="sv"><div class="n">spotify<small>https://spotify-mcp.example/mcp</small></div><div class="sw"></div><div class="ib"><svg><use href="#del"/></svg></div></div></div>
+<div class="crd"><h4>Add an MCP server</h4><div class="fld">Name</div><div class="fld">Address (https://…) or command</div><div class="link">Add</div></div>
+</div>
+<div class="nav"><div class="ni"><div class="pill"><svg><use href="#home"/></svg></div>Home</div><div class="ni"><div class="pill"><svg><use href="#folder"/></svg></div>Files</div><div class="ni"><div class="pill"><svg><use href="#pc"/></svg></div>Remote</div><div class="ni on"><div class="pill"><svg><use href="#spark"/></svg></div>ZoAI</div><div class="ni"><div class="pill"><svg><use href="#shield"/></svg></div>Access</div></div>
+</div><div class="cap">Model, ask-before-acting mode, MCP servers</div></div>
+
+<!-- 6: icon on home screen -->
+<div class="col"><div class="phone home">
+<div class="status"><span>9:41</span><span>●●● 5G</span></div>
+<div class="apps">
+<div><img src="icon.png"><span>Zohara Link</span></div>
+<div><div class="ic"></div><span>Camera</span></div><div><div class="ic"></div><span>Photos</span></div><div><div class="ic"></div><span>Clock</span></div>
+<div><div class="ic"></div><span>Maps</span></div><div><div class="ic"></div><span>Notes</span></div><div><div class="ic"></div><span>Music</span></div><div><div class="ic"></div><span>Phone</span></div>
+</div>
+<div style="margin:auto;text-align:center;padding:20px"><img src="icon.png" style="width:150px;height:150px;border-radius:38px"><div class="cap" style="margin-top:10px">the new icon, large</div></div>
+</div><div class="cap">The new Zohara Link icon: the Zohara diamonds, linked</div></div>

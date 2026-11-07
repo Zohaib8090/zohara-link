@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
@@ -57,7 +58,7 @@ object Zl {
     val bar = Color(0xFF0F141C)
 }
 
-enum class ZlScreen { WELCOME, FIND, PAIR, HOME, FILES, REMOTE, DESKTOP, GAMEPAD, STREAM, ACCESS }
+enum class ZlScreen { WELCOME, FIND, PAIR, HOME, FILES, REMOTE, DESKTOP, GAMEPAD, STREAM, ZOAI, ACCESS }
 
 @Composable
 fun ZlTheme(content: @Composable () -> Unit) {
@@ -180,6 +181,7 @@ private val navItems = listOf(
     NavItem(ZlScreen.HOME, "Home", Icons.Filled.Home),
     NavItem(ZlScreen.FILES, "Files", Icons.Filled.Folder),
     NavItem(ZlScreen.REMOTE, "Remote", Icons.Filled.Computer),
+    NavItem(ZlScreen.ZOAI, "ZoAI", Icons.Filled.AutoAwesome),
     NavItem(ZlScreen.ACCESS, "Access", Icons.Filled.Shield),
 )
 
