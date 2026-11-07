@@ -256,7 +256,7 @@ class ZoAiController(private val send: (JSONObject) -> Unit) {
         send(JSONObject().put("type", "ZOAI_LINE").put("rid", rid).put("op", "stop"))
     }
 
-    fun setMode(m: String) {
+    fun changeMode(m: String) {
         request(JSONObject().put("op", "mode").put("set", m.lowercase()), { d -> if (d.optBoolean("ok")) mode = d.optString("mode", m) else message = d.optString("error") })
     }
 
@@ -486,7 +486,7 @@ private fun SettingsPage(c: ZoAiController, onBack: () -> Unit) {
                     listOf("Auto", "Manual").forEach { m ->
                         Text(
                             m, color = if (c.mode.equals(m, true)) Zl.accentInk else Zl.text,
-                            modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(if (c.mode.equals(m, true)) Zl.accent else Zl.cardAlt).clickable { c.setMode(m) }.padding(horizontal = 16.dp, vertical = 10.dp),
+                            modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(if (c.mode.equals(m, true)) Zl.accent else Zl.cardAlt).clickable { c.changeMode(m) }.padding(horizontal = 16.dp, vertical = 10.dp),
                         )
                     }
                 }
