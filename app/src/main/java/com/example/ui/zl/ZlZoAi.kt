@@ -1,6 +1,7 @@
 package com.example.ui.zl
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -14,24 +15,34 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -40,13 +51,20 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.SharedFlow
@@ -120,17 +138,32 @@ class ZoAiController(private val send: (JSONObject) -> Unit) {
     private fun fail(why: String?) {
         if (why == null) return
         problem = why
+        ready = false
     }
+
+    /** True once the computer has answered a status request: ZO-AI there is reachable and this phone is allowed. */
+    var ready by mutableStateOf(false)
+    private var statusRid: String? = null
 
     fun refresh() {
         problem = null
-        request(JSONObject().put("op", "status"), { d ->
+        ready = false
+        val rid = request(JSONObject().put("op", "status"), { d ->
             if (d.optBoolean("ok")) {
+                ready = true
+                problem = null
                 provider = d.optString("provider")
                 model = d.optString("model")
                 mode = d.optString("mode", "Auto")
             }
         }, { fail(it) })
+        statusRid = rid
+        // an older computer-side program ignores ZoAI messages without answering: say what to do instead of waiting for ever
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (!ready && problem == null && statusRid == rid) {
+                problem = "The computer did not answer. On the computer: update Zohara Settings and Zohara Link (Settings > Zohara Update), open ZO-AI once, then switch on Settings > Zohara Link > this phone > Use ZO-AI."
+            }
+        }, 7000)
         loadChats()
     }
 
@@ -316,6 +349,12 @@ class ZoAiController(private val send: (JSONObject) -> Unit) {
 
 private enum class ZoPage { CHAT, CHATS, SETTINGS }
 
+private val Suggestions = listOf(
+    "Take a screenshot and tell me what is open",
+    "How full is my disk?",
+    "Open a terminal and show what is running",
+)
+
 @Composable
 fun ZoAiScreen(
     computerName: String,
@@ -328,94 +367,285 @@ fun ZoAiScreen(
     LaunchedEffect(Unit) { packets.collect { controller.onPacket(it) } }
     LaunchedEffect(connected) { if (connected) controller.refresh() }
 
-    Box(Modifier.fillMaxSize().imePadding()) {
+    Box(Modifier.fillMaxSize().background(Zl.bg).imePadding()) {
         when (page) {
-            ZoPage.CHAT -> ChatPage(computerName, connected, controller, onChats = { controller.loadChats(); page = ZoPage.CHATS }, onSettings = { controller.loadModels(); controller.loadServers(); page = ZoPage.SETTINGS })
+            ZoPage.CHAT -> ChatPage(
+                computerName, connected, controller,
+                onChats = { controller.loadChats(); page = ZoPage.CHATS },
+                onSettings = { controller.loadModels(); controller.loadServers(); page = ZoPage.SETTINGS },
+            )
             ZoPage.CHATS -> ChatsPage(controller, onBack = { page = ZoPage.CHAT })
-            ZoPage.SETTINGS -> SettingsPage(controller, onBack = { page = ZoPage.CHAT })
+            ZoPage.SETTINGS -> SettingsPage(controller, connected, onBack = { page = ZoPage.CHAT })
         }
         controller.approval?.let { a ->
             AlertDialog(
                 onDismissRequest = { controller.answer(false) },
                 containerColor = Zl.card,
-                title = { Text("Let ZO-AI do this?", color = Zl.text) },
-                text = { Text(a.summary, color = Zl.muted, fontFamily = FontFamily.Monospace, fontSize = 13.sp, modifier = Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState())) },
-                confirmButton = { TextButton(onClick = { controller.answer(true) }) { Text("Allow once", color = Zl.accent) } },
+                shape = RoundedCornerShape(24.dp),
+                title = { Text("Let ZO-AI do this?", color = Zl.text, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        a.summary, color = Zl.muted, fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 19.sp,
+                        modifier = Modifier.heightIn(max = 280.dp).clip(RoundedCornerShape(12.dp)).background(Zl.cardAlt).padding(12.dp).verticalScroll(rememberScrollState()),
+                    )
+                },
+                confirmButton = { TextButton(onClick = { controller.answer(true) }) { Text("Allow once", color = Zl.accent, fontWeight = FontWeight.Bold) } },
                 dismissButton = { TextButton(onClick = { controller.answer(false) }) { Text("Don't allow", color = Zl.muted) } },
             )
         }
     }
 }
 
+// ---- small building blocks ------------------------------------------------------------------------------------
+
 @Composable
-private fun TopRow(title: String, onLeft: (() -> Unit)?, leftIcon: androidx.compose.ui.graphics.vector.ImageVector, right: @Composable () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (onLeft != null) {
-            Box(Modifier.size(44.dp).clip(RoundedCornerShape(22.dp)).clickable { onLeft() }, contentAlignment = Alignment.Center) {
-                Icon(leftIcon, contentDescription = null, tint = Zl.text)
-            }
-        }
-        Text(title, color = Zl.text, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, modifier = Modifier.weight(1f).padding(horizontal = 8.dp))
-        right()
+private fun RoundIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: androidx.compose.ui.graphics.Color = Zl.text, onClick: () -> Unit) {
+    Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Icon(icon, contentDescription = label, tint = tint, modifier = Modifier.size(22.dp))
     }
 }
 
 @Composable
-private fun IconTap(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Box(Modifier.size(44.dp).clip(RoundedCornerShape(22.dp)).clickable { onClick() }, contentAlignment = Alignment.Center) {
-        Icon(icon, contentDescription = label, tint = Zl.text)
+private fun Bar(title: String, subtitle: String? = null, left: @Composable () -> Unit, right: @Composable () -> Unit = {}) {
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        left()
+        Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
+            Text(title, color = Zl.text, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (subtitle != null) Text(subtitle, color = Zl.muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        right()
     }
 }
+
+/** A card with its own inner padding (ZlCard has none). */
+@Composable
+private fun Panel(modifier: Modifier = Modifier, content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    ZlCard(modifier.padding(horizontal = 16.dp)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp), content = content)
+    }
+}
+
+@Composable
+private fun PrimaryButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(14.dp)).background(if (enabled) Zl.accent else Zl.accentSoft).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 20.dp, vertical = 12.dp),
+        contentAlignment = Alignment.Center,
+    ) { Text(text, color = if (enabled) Zl.accentInk else Zl.muted, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+}
+
+@Composable
+private fun fieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = Zl.accent,
+    unfocusedBorderColor = Zl.lineStrong,
+    focusedTextColor = Zl.text,
+    unfocusedTextColor = Zl.text,
+    cursorColor = Zl.accent,
+    focusedLabelColor = Zl.accent,
+    unfocusedLabelColor = Zl.muted,
+    focusedContainerColor = Zl.cardAlt,
+    unfocusedContainerColor = Zl.cardAlt,
+)
+
+// ---- rich text: **bold**, `code`, ``` blocks, headings and bullets ------------------------------------------
+
+private fun inline(text: String): AnnotatedString = buildAnnotatedString {
+    var i = 0
+    while (i < text.length) {
+        if (text.startsWith("**", i)) {
+            val end = text.indexOf("**", i + 2)
+            if (end > i) {
+                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(text.substring(i + 2, end)) }
+                i = end + 2
+                continue
+            }
+        }
+        if (text[i] == '`') {
+            val end = text.indexOf('`', i + 1)
+            if (end > i) {
+                withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = Zl.cardAlt, color = Zl.accent)) { append(text.substring(i + 1, end)) }
+                i = end + 1
+                continue
+            }
+        }
+        append(text[i])
+        i++
+    }
+}
+
+@Composable
+private fun RichText(text: String) {
+    val parts = text.split("```")
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        parts.forEachIndexed { n, part ->
+            if (n % 2 == 1) {
+                // a code block (the first line may name the language)
+                val code = part.substringAfter('\n', part).trimEnd()
+                Text(
+                    code, color = Zl.text, fontFamily = FontFamily.Monospace, fontSize = 12.5.sp, lineHeight = 18.sp,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Zl.cardAlt).border(1.dp, Zl.line, RoundedCornerShape(12.dp)).padding(12.dp),
+                )
+            } else if (part.isNotBlank()) {
+                val shown = part.trim('\n').lines().joinToString("\n") { l ->
+                    when {
+                        l.startsWith("### ") -> l.removePrefix("### ")
+                        l.startsWith("## ") -> l.removePrefix("## ")
+                        l.startsWith("# ") -> l.removePrefix("# ")
+                        l.startsWith("- ") || l.startsWith("* ") -> "•  " + l.drop(2)
+                        else -> l
+                    }
+                }
+                Text(inline(shown), color = Zl.text, fontSize = 15.5.sp, lineHeight = 23.sp)
+            }
+        }
+    }
+}
+
+// ---- the conversation, with commands grouped like on the computer ---------------------------------------------
+
+private sealed class ZoItem {
+    class Msg(val line: ZoLine) : ZoItem()
+    class Run(val lines: List<ZoLine>, val live: Boolean) : ZoItem()
+}
+
+private fun groupItems(lines: List<ZoLine>, busy: Boolean): List<ZoItem> {
+    val out = ArrayList<ZoItem>()
+    var group = ArrayList<ZoLine>()
+    fun flush(live: Boolean) {
+        if (group.isNotEmpty()) {
+            out.add(ZoItem.Run(group, live))
+            group = ArrayList()
+        }
+    }
+    lines.forEachIndexed { i, l ->
+        if (l.kind == "tool" || l.kind == "toolout") group.add(l) else {
+            flush(false)
+            out.add(ZoItem.Msg(l))
+        }
+        if (i == lines.size - 1) flush(busy)
+    }
+    return out
+}
+
+@Composable
+private fun RunBox(r: ZoItem.Run) {
+    var open by remember { mutableStateOf(false) }
+    val count = r.lines.count { it.kind == "tool" }
+    val shape = RoundedCornerShape(16.dp)
+    Column(Modifier.fillMaxWidth().clip(shape).background(if (r.live) Zl.accentSoft else Zl.card).border(1.dp, if (r.live) Zl.accent else Zl.line, shape)) {
+        Row(Modifier.fillMaxWidth().clickable { open = !open }.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (r.live) CircularProgressIndicator(Modifier.size(16.dp), color = Zl.accent, strokeWidth = 2.dp)
+            else Icon(Icons.Filled.Check, contentDescription = null, tint = Zl.ok, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(
+                if (r.live) "Working on your computer…" else if (count == 1) "Ran 1 command" else "Ran $count commands",
+                color = if (r.live) Zl.accent else Zl.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
+            )
+            Icon(if (open) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null, tint = Zl.muted, modifier = Modifier.size(20.dp))
+        }
+        if (open) {
+            Column(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                r.lines.forEach { l ->
+                    if (l.kind == "tool") Text(l.text, color = Zl.accent, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                    else Text(l.text, color = Zl.muted, fontFamily = FontFamily.Monospace, fontSize = 12.sp, maxLines = 8, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Bubble(l: ZoLine) {
+    when (l.kind) {
+        "user" -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Text(
+                l.text, color = Zl.text, fontSize = 15.5.sp, lineHeight = 22.sp,
+                modifier = Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(20.dp, 20.dp, 6.dp, 20.dp)).background(Zl.accentSoft).padding(horizontal = 16.dp, vertical = 12.dp),
+            )
+        }
+        "ai" -> RichText(l.text)
+        "error" -> Text(l.text, color = Zl.danger, fontSize = 13.5.sp, lineHeight = 19.sp, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Zl.dangerBg).padding(14.dp))
+        else -> Text(l.text, color = Zl.muted, fontSize = 12.5.sp, modifier = Modifier.fillMaxWidth())
+    }
+}
+
+// ---- pages ---------------------------------------------------------------------------------------------------
 
 @Composable
 private fun ChatPage(computerName: String, connected: Boolean, c: ZoAiController, onChats: () -> Unit, onSettings: () -> Unit) {
     val listState = rememberLazyListState()
     var input by remember { mutableStateOf("") }
-    val scope = rememberCoroutineScope()
-    LaunchedEffect(c.lines.size, c.lines.lastOrNull()?.text?.length) {
-        if (c.lines.isNotEmpty()) listState.scrollToItem(c.lines.size - 1)
+    val shown = groupItems(c.lines, c.busy)
+    LaunchedEffect(shown.size, c.lines.lastOrNull()?.text?.length) {
+        if (shown.isNotEmpty()) listState.scrollToItem(shown.size - 1)
     }
     Column(Modifier.fillMaxSize()) {
-        TopRow(c.title, onChats, Icons.Filled.Menu) {
-            IconTap(Icons.Filled.Add, "New chat") { c.newChat() }
-            IconTap(Icons.Filled.Settings, "Settings") { onSettings() }
-        }
-        val sub = when {
-            !connected -> "Not connected to $computerName"
-            c.model.isEmpty() -> "on $computerName"
-            else -> "${c.model} · ${c.mode} · $computerName"
-        }
-        Text(sub, color = Zl.muted, fontSize = 12.sp, maxLines = 1, modifier = Modifier.padding(horizontal = 20.dp))
-        Spacer(Modifier.height(6.dp))
-        val problem = c.problem
-        if (problem != null) {
-            ZlCard(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-                Text(problem, color = Zl.danger, fontSize = 14.sp)
-            }
+        Bar(
+            title = if (c.chatId == null) "ZoAI" else c.title,
+            subtitle = when {
+                !connected -> "Not connected to $computerName"
+                c.ready && c.model.isNotEmpty() -> "${c.model}  ·  ${c.mode}  ·  $computerName"
+                c.ready -> computerName
+                else -> "Connecting to ZO-AI on $computerName…"
+            },
+            left = { RoundIcon(Icons.Filled.Menu, "Chats", onClick = onChats) },
+            right = {
+                RoundIcon(Icons.Filled.Add, "New chat") { c.newChat() }
+                RoundIcon(Icons.Filled.Settings, "Settings", onClick = onSettings)
+            },
+        )
+        c.problem?.let { p ->
+            Text(p, color = Zl.danger, fontSize = 13.5.sp, lineHeight = 19.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Zl.dangerBg).padding(14.dp))
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (c.lines.isEmpty()) {
-                Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("ZoAI", color = Zl.accent, fontSize = 28.sp, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Ask ZO-AI on $computerName to do something. It uses the computer's model, files, terminal, browser and MCP servers.", color = Zl.muted, fontSize = 14.sp)
+                Column(Modifier.align(Alignment.Center).padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(Modifier.size(76.dp).clip(CircleShape).background(Zl.accentSoft), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(38.dp))
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    Text("Ask ZO-AI", color = Zl.text, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+                    Spacer(Modifier.height(6.dp))
+                    Text("It works on $computerName: files, terminal, browser, apps and your MCP servers.", color = Zl.muted, fontSize = 14.sp, lineHeight = 20.sp, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(22.dp))
+                    Suggestions.forEach { s ->
+                        Text(
+                            s, color = Zl.text, fontSize = 14.sp,
+                            modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Zl.card).border(1.dp, Zl.line, RoundedCornerShape(16.dp))
+                                .clickable(enabled = connected) { c.sendMessage(s) }.padding(horizontal = 16.dp, vertical = 14.dp),
+                        )
+                    }
                 }
             }
-            LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(c.lines.size) { i -> Bubble(c.lines[i]) }
+            LazyColumn(
+                state = listState, modifier = Modifier.fillMaxSize(),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 10.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                items(shown.size) { i ->
+                    when (val item = shown[i]) {
+                        is ZoItem.Msg -> Bubble(item.line)
+                        is ZoItem.Run -> RunBox(item)
+                    }
+                }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.Bottom) {
-            OutlinedTextField(
+        // the message box: one rounded field with the send button inside it
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp).clip(RoundedCornerShape(28.dp)).background(Zl.card).border(1.dp, Zl.lineStrong, RoundedCornerShape(28.dp)).padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            BasicTextField(
                 value = input,
                 onValueChange = { input = it },
-                modifier = Modifier.weight(1f).heightIn(max = 160.dp),
-                placeholder = { Text("Message ZO-AI", color = Zl.muted) },
-                shape = RoundedCornerShape(20.dp),
+                modifier = Modifier.weight(1f).heightIn(min = 40.dp, max = 140.dp).padding(vertical = 10.dp),
+                textStyle = TextStyle(color = Zl.text, fontSize = 16.sp, lineHeight = 22.sp),
+                cursorBrush = SolidColor(Zl.accent),
+                decorationBox = { inner ->
+                    Box { if (input.isEmpty()) Text("Message ZO-AI", color = Zl.muted, fontSize = 16.sp); inner() }
+                },
             )
-            Spacer(Modifier.size(8.dp))
             Box(
-                Modifier.size(52.dp).clip(RoundedCornerShape(26.dp)).background(if (c.busy) Zl.dangerBg else Zl.accent)
+                Modifier.size(44.dp).clip(CircleShape).background(if (c.busy) Zl.dangerBg else if (input.isBlank()) Zl.accentSoft else Zl.accent)
                     .clickable {
                         if (c.busy) c.stop()
                         else if (connected && input.isNotBlank()) {
@@ -426,42 +656,26 @@ private fun ChatPage(computerName: String, connected: Boolean, c: ZoAiController
                 contentAlignment = Alignment.Center,
             ) {
                 if (c.busy) Icon(Icons.Filled.Close, contentDescription = "Stop", tint = Zl.danger)
-                else Icon(Icons.Filled.ArrowUpward, contentDescription = "Send", tint = Zl.accentInk)
+                else Icon(Icons.Filled.ArrowUpward, contentDescription = "Send", tint = if (input.isBlank()) Zl.muted else Zl.accentInk)
             }
         }
-    }
-}
-
-@Composable
-private fun Bubble(l: ZoLine) {
-    when (l.kind) {
-        "user" -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Text(l.text, color = Zl.text, fontSize = 15.sp, modifier = Modifier.widthIn(max = 300.dp).clip(RoundedCornerShape(18.dp)).background(Zl.accentSoft).padding(horizontal = 14.dp, vertical = 10.dp))
-        }
-        "ai" -> Text(l.text, color = Zl.text, fontSize = 15.sp, lineHeight = 22.sp, modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp))
-        "tool" -> Text("▸ " + l.text, color = Zl.accent, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Zl.cardAlt).padding(8.dp))
-        "toolout" -> Text(l.text, color = Zl.muted, fontSize = 12.sp, fontFamily = FontFamily.Monospace, maxLines = 6, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp))
-        "error" -> Text(l.text, color = Zl.danger, fontSize = 13.sp, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Zl.dangerBg).padding(10.dp))
-        else -> Text(l.text, color = Zl.muted, fontSize = 12.sp, modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp))
     }
 }
 
 @Composable
 private fun ChatsPage(c: ZoAiController, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
-        TopRow("Chats", onBack, Icons.Filled.Close) {
-            IconTap(Icons.Filled.Add, "New chat") { c.newChat(); onBack() }
-        }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (c.chats.isEmpty()) item { Text("No chats yet.", color = Zl.muted, modifier = Modifier.padding(16.dp)) }
+        Bar("Chats", left = { RoundIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = onBack) }, right = { RoundIcon(Icons.Filled.Add, "New chat") { c.newChat(); onBack() } })
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (c.chats.isEmpty()) item { Text("No chats yet. Start one with the + button.", color = Zl.muted, modifier = Modifier.padding(8.dp)) }
             items(c.chats.size) { i ->
                 val ch = c.chats[i]
                 Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Zl.card).clickable { c.openChat(ch.id); onBack() }.padding(horizontal = 14.dp, vertical = 6.dp),
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Zl.card).border(1.dp, Zl.line, RoundedCornerShape(16.dp)).clickable { c.openChat(ch.id); onBack() }.padding(start = 18.dp, end = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(ch.title.ifBlank { "Chat" }, color = Zl.text, fontSize = 15.sp, maxLines = 1, modifier = Modifier.weight(1f))
-                    IconTap(Icons.Filled.Delete, "Delete") { c.deleteChat(ch.id) }
+                    Text(ch.title.ifBlank { "Chat" }, color = Zl.text, fontSize = 15.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(vertical = 16.dp))
+                    RoundIcon(Icons.Filled.Delete, "Delete", tint = Zl.muted) { c.deleteChat(ch.id) }
                 }
             }
         }
@@ -469,65 +683,84 @@ private fun ChatsPage(c: ZoAiController, onBack: () -> Unit) {
 }
 
 @Composable
-private fun SettingsPage(c: ZoAiController, onBack: () -> Unit) {
+private fun SettingsPage(c: ZoAiController, connected: Boolean, onBack: () -> Unit) {
     var name by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
     var json by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize()) {
-        TopRow("ZoAI settings", onBack, Icons.Filled.Close) {}
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            c.message?.let { m ->
-                ZlCard { Text(m, color = Zl.text, fontSize = 14.sp) }
+        Bar("ZoAI settings", left = { RoundIcon(Icons.AutoMirrored.Filled.ArrowBack, "Back", onClick = onBack) })
+        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            // is ZO-AI reachable?
+            Panel {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(10.dp).clip(CircleShape).background(if (c.ready) Zl.ok else Zl.danger))
+                    Spacer(Modifier.width(10.dp))
+                    Text(if (c.ready) "ZO-AI is ready on your computer" else if (!connected) "Not connected to your computer" else "ZO-AI is not reachable yet", color = Zl.text, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
+                if (!c.ready) {
+                    Text(c.problem ?: "Switch on Settings > Zohara Link > this phone > Use ZO-AI on the computer, and keep ZO-AI running there.", color = Zl.muted, fontSize = 13.sp, lineHeight = 18.sp)
+                    Spacer(Modifier.height(6.dp))
+                    PrimaryButton("Check again") { c.refresh() }
+                }
             }
-            ZlCard {
-                Text("Ask before acting", color = Zl.text, fontWeight = FontWeight.SemiBold)
-                Text("Auto runs safe things and asks for the rest. Manual asks before every change. Skipping the questions (Bypass) can only be switched on at the computer.", color = Zl.muted, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+            c.message?.let { m -> Panel { Text(m, color = Zl.text, fontSize = 14.sp, lineHeight = 20.sp) } }
+            Panel {
+                Text("Ask before acting", color = Zl.text, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Auto runs safe things and asks for the rest. Manual asks before every change. Skipping the questions (Bypass) can only be switched on at the computer.", color = Zl.muted, fontSize = 13.sp, lineHeight = 18.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 10.dp)) {
                     listOf("Auto", "Manual").forEach { m ->
-                        Text(
-                            m, color = if (c.mode.equals(m, true)) Zl.accentInk else Zl.text,
-                            modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(if (c.mode.equals(m, true)) Zl.accent else Zl.cardAlt).clickable { c.changeMode(m) }.padding(horizontal = 16.dp, vertical = 10.dp),
-                        )
+                        val on = c.mode.equals(m, true)
+                        Box(
+                            Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(if (on) Zl.accent else Zl.cardAlt).border(1.dp, if (on) Zl.accent else Zl.line, RoundedCornerShape(14.dp)).clickable { c.changeMode(m) }.padding(vertical = 13.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(m, color = if (on) Zl.accentInk else Zl.text, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
                     }
                 }
             }
-            ZlCard {
-                Text("Model", color = Zl.text, fontWeight = FontWeight.SemiBold)
-                Text(if (c.provider.isEmpty()) "Choose a provider on the computer first." else "${c.provider}: ${c.model.ifEmpty { "none chosen" }}", color = Zl.muted, fontSize = 13.sp)
-                Column(Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()).padding(top = 6.dp)) {
+            Panel {
+                Text("Model", color = Zl.text, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text(if (c.provider.isEmpty()) "Choose a provider on the computer first (ZO-AI > Settings)." else "Provider: ${c.provider}", color = Zl.muted, fontSize = 13.sp)
+                Column(Modifier.heightIn(max = 280.dp).verticalScroll(rememberScrollState()).padding(top = 6.dp)) {
                     c.models.forEach { m ->
+                        val on = m == c.model
                         Text(
-                            m, color = if (m == c.model) Zl.accent else Zl.text, fontSize = 14.sp,
-                            modifier = Modifier.fillMaxWidth().clickable { c.chooseModel(m) }.padding(vertical = 9.dp),
+                            m, color = if (on) Zl.accent else Zl.text, fontSize = 14.5.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal,
+                            modifier = Modifier.fillMaxWidth().clickable { c.chooseModel(m) }.padding(vertical = 11.dp),
                         )
                     }
                 }
             }
-            ZlCard {
-                Text("MCP servers", color = Zl.text, fontWeight = FontWeight.SemiBold)
-                Text("Tools you give ZO-AI on the computer. They are added there, so the computer needs to be on.", color = Zl.muted, fontSize = 13.sp)
+            Panel {
+                Text("MCP servers", color = Zl.text, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("Tools you give ZO-AI. They are added on the computer, so it needs to be on.", color = Zl.muted, fontSize = 13.sp, lineHeight = 18.sp)
+                if (c.servers.isEmpty()) Text("None added yet.", color = Zl.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
                 c.servers.forEach { s ->
                     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(s.name, color = Zl.text, fontSize = 15.sp)
-                            Text(s.command, color = Zl.muted, fontSize = 11.sp, maxLines = 1)
+                            Text(s.name, color = Zl.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                            Text(s.command, color = Zl.muted, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
-                        Switch(checked = s.enabled, onCheckedChange = { c.toggleServer(s.name, it) })
-                        IconTap(Icons.Filled.Delete, "Remove") { c.removeServer(s.name) }
+                        Switch(
+                            checked = s.enabled, onCheckedChange = { c.toggleServer(s.name, it) },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Zl.accentInk, checkedTrackColor = Zl.accent, uncheckedThumbColor = Zl.muted, uncheckedTrackColor = Zl.card, uncheckedBorderColor = Zl.lineStrong),
+                        )
+                        RoundIcon(Icons.Filled.Delete, "Remove", tint = Zl.muted) { c.removeServer(s.name) }
                     }
                 }
-                if (c.servers.isEmpty()) Text("None yet.", color = Zl.muted, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp))
             }
-            ZlCard {
-                Text("Add an MCP server", color = Zl.text, fontWeight = FontWeight.SemiBold)
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                OutlinedTextField(value = address, onValueChange = { address = it }, label = { Text("Address (https://…) or command") }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                TextButton(onClick = { if (name.isNotBlank() && address.isNotBlank()) { c.addServer(name.trim(), address.trim()); name = ""; address = "" } }) { Text("Add", color = Zl.accent) }
+            Panel {
+                Text("Add an MCP server", color = Zl.text, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Name") }, singleLine = true, shape = RoundedCornerShape(14.dp), colors = fieldColors(), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                OutlinedTextField(value = address, onValueChange = { address = it }, label = { Text("Address (https://…) or command") }, shape = RoundedCornerShape(14.dp), colors = fieldColors(), modifier = Modifier.fillMaxWidth().padding(top = 6.dp))
+                Spacer(Modifier.height(6.dp))
+                PrimaryButton("Add server", enabled = name.isNotBlank() && address.isNotBlank()) { c.addServer(name.trim(), address.trim()); name = ""; address = "" }
+                Spacer(Modifier.height(10.dp))
                 Text("Or paste a configuration (the JSON other apps use):", color = Zl.muted, fontSize = 13.sp)
-                OutlinedTextField(value = json, onValueChange = { json = it }, label = { Text("Configuration") }, modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp, max = 200.dp).padding(top = 8.dp))
-                TextButton(onClick = { if (json.isNotBlank()) { c.importServers(json); json = "" } }) { Text("Add from configuration", color = Zl.accent) }
+                OutlinedTextField(value = json, onValueChange = { json = it }, label = { Text("Configuration") }, shape = RoundedCornerShape(14.dp), colors = fieldColors(), modifier = Modifier.fillMaxWidth().heightIn(min = 100.dp, max = 220.dp).padding(top = 6.dp))
+                Spacer(Modifier.height(6.dp))
+                PrimaryButton("Add from configuration", enabled = json.isNotBlank()) { c.importServers(json); json = "" }
             }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(28.dp))
         }
     }
 }
