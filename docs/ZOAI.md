@@ -33,8 +33,11 @@ Phone to daemon (all on the authenticated TLS connection):
 | `ZOAI_EVT {rid, data}` | (from the computer) one answer or event |
 | `ZOAI_END {rid, error?}` | (from the computer) the request is over; `error` says why when it failed |
 
-Requests (`op`): `status`, `chats`, `chat {id}`, `delete_chat`, `pin_chat`, `mode {set?}`, `providers`, `models`, `select {provider?, model?}`,
-`mcp_list`, `mcp_add {name, address, token?}`, `mcp_import {config}`, `mcp_remove`, `mcp_toggle`, and `send {text, chat?, mode?}`.
+Requests (`op`): `status`, `chats`, `chat {id}` (entries and the takes of your messages), `delete_chat`, `pin_chat`, `mode {set?}`, `providers`, `models`,
+`select {provider?, model?, effort?}`, `set_key {key, provider?}` (kept in the computer's keyring, never on the phone), `profiles`, `profile_use`, `profile_create`,
+`profile_rename`, `profile_delete`, `profile_pin`, `mcp_list`, `mcp_add {name, address, token?}`, `mcp_import {config}`, `mcp_remove`, `mcp_toggle`,
+`scheduled`, `schedule_add`, `schedule_cancel`, `projects`, `project_create`, `compact {id}`, `switch {id, nth, delta}` (show another take) and
+`send {text, chat?, mode?, edit?}`; `edit` is the number of your message to edit or ask again (what was there is kept as an earlier take, as on the computer).
 `send` streams events: `chat {id,title}`, `delta {text}`, `text {text}` (the whole text of a step), `tool_start`, `tool_done`, `approval {id, summary}`,
 `usage`, `error`, `stopped`, and finally `done`. Chats are saved in ZO-AI's own store, so a chat started on the phone shows in the app on the
 computer and the other way round.

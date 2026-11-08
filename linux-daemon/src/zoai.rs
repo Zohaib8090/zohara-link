@@ -10,7 +10,9 @@ use std::path::PathBuf;
 /// The requests a phone may make. Anything else is refused here.
 const OPS: &[&str] = &[
     "status", "chats", "chat", "delete_chat", "pin_chat", "mode", "providers", "models", "select", "mcp_list", "mcp_add",
-    "mcp_import", "mcp_remove", "mcp_toggle", "send",
+    "mcp_import", "mcp_remove", "mcp_toggle", "send", "switch", "set_key", "profiles", "profile_use", "profile_create",
+    "profile_rename", "profile_delete", "profile_pin", "scheduled", "schedule_cancel", "schedule_add", "projects", "project_create",
+    "compact",
 ];
 
 /// Where ZO-AI listens: `$XDG_RUNTIME_DIR/zo-ai/agent.sock`, like the program itself.
