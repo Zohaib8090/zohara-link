@@ -598,7 +598,7 @@ private fun ChatPage(computerName: String, connected: Boolean, c: ZoAiController
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (c.lines.isEmpty()) {
-                Column(Modifier.align(Alignment.Center).padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(Modifier.align(Alignment.Center).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Box(Modifier.size(76.dp).clip(CircleShape).background(Zl.accentSoft), contentAlignment = Alignment.Center) {
                         Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(38.dp))
                     }
@@ -607,7 +607,22 @@ private fun ChatPage(computerName: String, connected: Boolean, c: ZoAiController
                     Spacer(Modifier.height(6.dp))
                     Text("It works on $computerName: files, terminal, browser, apps and your MCP servers.", color = Zl.muted, fontSize = 14.sp, lineHeight = 20.sp, textAlign = TextAlign.Center)
                     Spacer(Modifier.height(22.dp))
-                    Suggestions.forEach { s ->
+                    // the chats already made with ZO-AI on the computer (before and after this phone), newest first
+                    if (c.chats.isNotEmpty()) {
+                        Text("Your chats", color = Zl.muted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp))
+                        c.chats.take(5).forEach { ch ->
+                            Text(
+                                ch.title.ifBlank { "Chat" }, color = Zl.text, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Zl.card).border(1.dp, Zl.line, RoundedCornerShape(16.dp))
+                                    .clickable { c.openChat(ch.id) }.padding(horizontal = 16.dp, vertical = 14.dp),
+                            )
+                        }
+                        if (c.chats.size > 5) {
+                            Text("All ${c.chats.size} chats", color = Zl.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp).clickable(onClick = onChats).padding(8.dp))
+                        }
+                        Spacer(Modifier.height(14.dp))
+                    }
+                    (if (c.chats.isEmpty()) Suggestions else Suggestions.take(1)).forEach { s ->
                         Text(
                             s, color = Zl.text, fontSize = 14.sp,
                             modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Zl.card).border(1.dp, Zl.line, RoundedCornerShape(16.dp))
