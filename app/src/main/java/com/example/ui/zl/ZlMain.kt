@@ -34,6 +34,12 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.DesktopWindows
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
@@ -229,18 +235,27 @@ fun FilesScreen(
         Title("Files")
 
         val shape = RoundedCornerShape(24.dp)
+        val dashColor = Zl.accent.copy(alpha = 0.5f)
         Column(
             Modifier
                 .fillMaxWidth()
-                .height(148.dp)
+                .height(176.dp)
                 .clip(shape)
-                .background(Zl.cardAlt)
-                .border(1.5.dp, Zl.lineStrong, shape)
+                .background(Brush.verticalGradient(listOf(Zl.accentSoft, Zl.card)))
+                .drawBehind {
+                    drawRoundRect(
+                        color = dashColor,
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(24.dp.toPx()),
+                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f, pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(18f, 14f))),
+                    )
+                }
                 .clickable(role = Role.Button, onClick = onChoose),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(Icons.Filled.FileUpload, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(34.dp))
+            Box(Modifier.size(54.dp).clip(RoundedCornerShape(18.dp)).background(Zl.accent), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.FileUpload, contentDescription = null, tint = Zl.accentInk, modifier = Modifier.size(28.dp))
+            }
             Spacer(Modifier.height(10.dp))
             Text("Choose files to send", color = Zl.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             Text("They go straight to $computerName", color = Zl.muted, fontSize = 13.sp)
@@ -327,38 +342,54 @@ fun RemoteScreen(
     onStream: () -> Unit,
     onMedia: (String) -> Unit,
     onDesktop: () -> Unit,
+    onKeyboard: () -> Unit,
 ) {
     Column(
         Page
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 24.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Title("Remote")
+            Column {
+                Title("Remote")
+                Text("Use your phone as a touchpad", color = Zl.muted, fontSize = 14.sp)
+            }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Box(Modifier.size(8.dp).clip(CircleShape).background(if (connected) Zl.ok else Zl.muted))
                 Text(computerName, color = if (connected) Zl.ok else Zl.muted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 2.dp))
             }
         }
 
-        Text(
-            "The computer decides if this phone may control the mouse. If nothing moves, turn it on there: Settings > Zohara Link.",
-            color = androidx.compose.ui.graphics.Color(0xFFBFE9E9), fontSize = 13.sp, lineHeight = 19.sp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Zl.accentSoft)
-                .padding(horizontal = 14.dp, vertical = 12.dp),
-        )
+        // what is playing on the computer
+        val cardShape = RoundedCornerShape(24.dp)
+        Row(
+            Modifier.fillMaxWidth().clip(cardShape).background(Zl.card).border(1.dp, Zl.line, cardShape).padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(Modifier.size(52.dp).clip(RoundedCornerShape(14.dp)).background(Brush.linearGradient(listOf(Zl.accent, Zl.accentSoft))), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.MusicNote, contentDescription = null, tint = Zl.accentInk, modifier = Modifier.size(24.dp))
+            }
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (media.title.isBlank() || media.title == "No media playing") "Nothing playing" else media.title,
+                    color = Zl.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+                Text(if (media.artist.isNotBlank()) media.artist else "Playing on the computer", color = Zl.muted, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            RoundIcon(Icons.Filled.SkipPrevious, "Previous", 40, Color.Transparent, Zl.text) { onMedia("PREVIOUS") }
+            RoundIcon(if (media.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (media.isPlaying) "Pause" else "Play", 44, Zl.accent, Zl.accentInk) { onMedia("PLAY_PAUSE") }
+            RoundIcon(Icons.Filled.SkipNext, "Next", 40, Color.Transparent, Zl.text) { onMedia("NEXT") }
+        }
 
-        val pad = RoundedCornerShape(28.dp)
+        val pad = RoundedCornerShape(30.dp)
         Touchpad(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(292.dp)
+                .height(268.dp)
                 .clip(pad)
-                .background(Zl.card)
+                .background(Brush.radialGradient(listOf(Zl.accentSoft, Zl.card)))
                 .border(1.dp, Zl.line, pad)
                 .semantics { contentDescription = "Touchpad. Drag a finger to move the pointer, tap to click, two fingers to scroll." },
             onMove = onMove,
@@ -367,43 +398,59 @@ fun RemoteScreen(
             onScroll = onScroll,
         ) {
             Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Filled.Mouse, contentDescription = null, tint = androidx.compose.ui.graphics.Color(0xFF3A4A5E), modifier = Modifier.size(36.dp))
-                Spacer(Modifier.height(10.dp))
-                Text("Drag to move the pointer", color = Zl.muted, fontSize = 14.sp)
-                Text("Tap to click · two fingers: right-click and scroll", color = Zl.muted, fontSize = 12.5.sp)
-                Text("Tap, then touch and drag: hold the button", color = Zl.muted, fontSize = 12.5.sp)
+                Box(Modifier.size(64.dp).clip(CircleShape).border(1.5.dp, Zl.accent, CircleShape), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Filled.Mouse, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(28.dp))
+                }
+                Spacer(Modifier.height(12.dp))
+                Text("Drag to move the pointer", color = Zl.muted, fontSize = 13.5.sp)
+                Text("Two fingers: scroll · Tap, then drag: hold", color = Zl.muted, fontSize = 12.sp)
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SecondaryButton("Left click", Modifier.weight(1f)) { onClick("LEFT") }
-            SecondaryButton("Right click", Modifier.weight(1f)) { onClick("RIGHT") }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ClickKey("Left click", Modifier.weight(1f)) { onClick("LEFT") }
+            ClickKey("Right click", Modifier.weight(1f)) { onClick("RIGHT") }
         }
-        SecondaryButton("See and control the computer's screen", Modifier.fillMaxWidth()) { onDesktop() }
-        SecondaryButton("Play: live video with a game controller", Modifier.fillMaxWidth()) { onStream() }
-        SecondaryButton("Use the phone as a game controller only", Modifier.fillMaxWidth()) { onGamepad() }
+        Text(
+            "If nothing moves, the computer has not allowed this phone yet: Settings > Zohara Link on the computer.",
+            color = Zl.muted, fontSize = 12.sp, lineHeight = 17.sp,
+        )
 
-        ZlCard {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Column {
-                    Text("Playing on the computer", color = Zl.muted, fontSize = 12.5.sp)
-                    Text(
-                        if (media.title.isBlank() || media.title == "No media playing") "Nothing playing" else media.title,
-                        color = Zl.text, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
-                    if (media.artist.isNotBlank()) {
-                        Text(media.artist, color = Zl.muted, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                    RoundIcon(Icons.Filled.SkipPrevious, "Previous", 56, Zl.bg, Zl.text) { onMedia("PREVIOUS") }
-                    Spacer(Modifier.size(20.dp))
-                    RoundIcon(if (media.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, if (media.isPlaying) "Pause" else "Play", 68, Zl.accent, Zl.accentInk) { onMedia("PLAY_PAUSE") }
-                    Spacer(Modifier.size(20.dp))
-                    RoundIcon(Icons.Filled.SkipNext, "Next", 56, Zl.bg, Zl.text) { onMedia("NEXT") }
-                }
-            }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            ModeTile(Icons.Filled.DesktopWindows, "Screen", Modifier.weight(1f), onDesktop)
+            ModeTile(Icons.Filled.Keyboard, "Keyboard", Modifier.weight(1f), onKeyboard)
+            ModeTile(Icons.Filled.SportsEsports, "Gamepad", Modifier.weight(1f), onGamepad)
         }
+        ModeTile(Icons.Filled.PlayArrow, "Play: live video with a game controller", Modifier.fillMaxWidth(), onStream, wide = true)
+    }
+}
+
+@Composable
+private fun ClickKey(label: String, modifier: Modifier, onClick: () -> Unit) {
+    val shape = RoundedCornerShape(16.dp)
+    Box(
+        modifier.height(50.dp).clip(shape).background(Zl.card).border(1.dp, Zl.line, shape).clickable(role = Role.Button, onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) { Text(label, color = Zl.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold) }
+}
+
+@Composable
+private fun ModeTile(icon: ImageVector, label: String, modifier: Modifier, onClick: () -> Unit, wide: Boolean = false) {
+    val shape = RoundedCornerShape(18.dp)
+    val body: @Composable () -> Unit = {
+        Icon(icon, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(22.dp))
+        Text(label, color = Zl.text, fontSize = if (wide) 14.sp else 12.5.sp, fontWeight = FontWeight.SemiBold)
+    }
+    if (wide) {
+        Row(
+            modifier.height(56.dp).clip(shape).background(Zl.card).border(1.dp, Zl.line, shape).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) { body() }
+    } else {
+        Column(
+            modifier.height(76.dp).clip(shape).background(Zl.card).border(1.dp, Zl.line, shape).clickable(role = Role.Button, onClick = onClick).padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) { body() }
     }
 }
 

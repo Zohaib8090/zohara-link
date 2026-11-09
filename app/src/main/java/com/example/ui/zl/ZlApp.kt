@@ -219,7 +219,7 @@ fun ZlApp(vm: EcosystemViewModel) {
                 vm.disconnect()
                 ZlScreen.FIND
             }
-            ZlScreen.DESKTOP -> ZlScreen.REMOTE
+            ZlScreen.DESKTOP, ZlScreen.KEYBOARD -> ZlScreen.REMOTE
             else -> ZlScreen.HOME
         }
     }
@@ -288,6 +288,14 @@ fun ZlApp(vm: EcosystemViewModel) {
                         onBack = { screen = ZlScreen.REMOTE },
                     )
                 }
+                ZlScreen.KEYBOARD -> DesktopKeyboardScreen(
+                    computerName = computerName,
+                    connected = connected,
+                    onType = { vm.sendInputType(it) },
+                    onKey = { vm.sendInputKey(it) },
+                    onKeyCode = { code, down -> vm.sendInputKeyCode(code, down) },
+                    onClose = { screen = ZlScreen.REMOTE },
+                )
                 ZlScreen.STREAM -> GameStreamScreen(
                     client = streamClient,
                     computerName = computerName,
@@ -375,6 +383,7 @@ fun ZlApp(vm: EcosystemViewModel) {
                                 onStream = { screen = ZlScreen.STREAM },
                                 onMedia = { vm.sendMediaAction(it) },
                                 onDesktop = { screen = ZlScreen.DESKTOP },
+                                onKeyboard = { screen = ZlScreen.KEYBOARD },
                             )
                             else -> AccessScreen(
                                 computerName = computerName,

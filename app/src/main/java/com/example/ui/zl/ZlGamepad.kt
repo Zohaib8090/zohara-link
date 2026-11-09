@@ -6,9 +6,12 @@ import android.content.ContextWrapper
 import android.content.pm.ActivityInfo
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
@@ -16,6 +19,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -133,25 +143,35 @@ fun GamepadControls(
     }
 
     Box(modifier.fillMaxSize()) {
-        // top row: close, status, bumpers and triggers
-        Row(Modifier.align(Alignment.TopCenter).padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                if (connected) "Controller on $computerName" else "Not connected to the computer",
-                color = if (connected) Zl.ok else Zl.muted, fontSize = 12.sp,
-            )
+        // top left: close, and which computer the controller is on
+        Row(Modifier.align(Alignment.TopStart).padding(start = 24.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(40.dp).clip(CircleShape).background(Zl.card).border(1.dp, Zl.line, CircleShape).clickable { onClose() },
+                contentAlignment = Alignment.Center,
+            ) { Icon(Icons.Filled.Close, contentDescription = "Close", tint = Zl.text, modifier = Modifier.size(20.dp)) }
+            Column(Modifier.padding(start = 12.dp)) {
+                Text("Gamepad", color = Zl.text, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(7.dp).clip(CircleShape).background(if (connected) Zl.ok else Zl.muted))
+                    Text(
+                        if (connected) "  $computerName · Xbox controller" else "  Not connected to the computer",
+                        color = Zl.muted, fontSize = 12.sp,
+                    )
+                }
+            }
         }
-        PadButton("Close", Modifier.align(Alignment.TopCenter).padding(top = 30.dp), 64.dp, 30.dp, onPress = { onClose() }, onRelease = {})
 
-        PadButton("LT", Modifier.align(Alignment.TopStart).padding(start = 24.dp, top = 12.dp), 84.dp, 44.dp, onPress = { lt = 1f }, onRelease = { lt = 0f })
-        PadButton("LB", Modifier.align(Alignment.TopStart).padding(start = 24.dp, top = 62.dp), 84.dp, 40.dp, onPress = { setBit(Pad.LB, true) }, onRelease = { setBit(Pad.LB, false) })
-        PadButton("RT", Modifier.align(Alignment.TopEnd).padding(end = 24.dp, top = 12.dp), 84.dp, 44.dp, onPress = { rt = 1f }, onRelease = { rt = 0f })
-        PadButton("RB", Modifier.align(Alignment.TopEnd).padding(end = 24.dp, top = 62.dp), 84.dp, 40.dp, onPress = { setBit(Pad.RB, true) }, onRelease = { setBit(Pad.RB, false) })
+        // triggers and bumpers, under the top row
+        PadButton("LT", Modifier.align(Alignment.TopStart).padding(start = 30.dp, top = 70.dp), 118.dp, 44.dp, onPress = { lt = 1f }, onRelease = { lt = 0f })
+        PadButton("LB", Modifier.align(Alignment.TopStart).padding(start = 158.dp, top = 70.dp), 70.dp, 44.dp, onPress = { setBit(Pad.LB, true) }, onRelease = { setBit(Pad.LB, false) })
+        PadButton("RT", Modifier.align(Alignment.TopEnd).padding(end = 30.dp, top = 70.dp), 118.dp, 44.dp, onPress = { rt = 1f }, onRelease = { rt = 0f })
+        PadButton("RB", Modifier.align(Alignment.TopEnd).padding(end = 158.dp, top = 70.dp), 70.dp, 44.dp, onPress = { setBit(Pad.RB, true) }, onRelease = { setBit(Pad.RB, false) })
 
         // middle: Back, Guide, Start
-        Row(Modifier.align(Alignment.Center).padding(top = 40.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp)) {
-            PadButton("Back", Modifier, 58.dp, 34.dp, onPress = { setBit(Pad.BACK, true) }, onRelease = { setBit(Pad.BACK, false) })
-            PadButton("Guide", Modifier, 58.dp, 34.dp, onPress = { setBit(Pad.GUIDE, true) }, onRelease = { setBit(Pad.GUIDE, false) })
-            PadButton("Start", Modifier, 58.dp, 34.dp, onPress = { setBit(Pad.START, true) }, onRelease = { setBit(Pad.START, false) })
+        Row(Modifier.align(Alignment.Center).padding(top = 40.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp)) {
+            PadButton("Back", Modifier.align(Alignment.CenterVertically), 64.dp, 34.dp, onPress = { setBit(Pad.BACK, true) }, onRelease = { setBit(Pad.BACK, false) })
+            PadButton("Guide", Modifier, 56.dp, 56.dp, round = true, tint = Zl.accent, onPress = { setBit(Pad.GUIDE, true) }, onRelease = { setBit(Pad.GUIDE, false) })
+            PadButton("Start", Modifier.align(Alignment.CenterVertically), 64.dp, 34.dp, onPress = { setBit(Pad.START, true) }, onRelease = { setBit(Pad.START, false) })
         }
 
         // left stick (bottom left) and direction pad above it
@@ -164,10 +184,10 @@ fun GamepadControls(
         Stick(Modifier.align(Alignment.BottomEnd).padding(end = 190.dp, bottom = 24.dp), 130.dp) { x, y -> rx = x; ry = y }
         Box(Modifier.align(Alignment.CenterEnd).padding(end = 30.dp, bottom = 40.dp).size(150.dp)) {
             val bs = 52.dp
-            PadButton("Y", Modifier.align(Alignment.TopCenter), bs, bs, round = true, color = Color(0xFFE0B341), onPress = { setBit(Pad.Y, true) }, onRelease = { setBit(Pad.Y, false) })
-            PadButton("A", Modifier.align(Alignment.BottomCenter), bs, bs, round = true, color = Color(0xFF5FC47A), onPress = { setBit(Pad.A, true) }, onRelease = { setBit(Pad.A, false) })
-            PadButton("X", Modifier.align(Alignment.CenterStart), bs, bs, round = true, color = Color(0xFF5B9BE6), onPress = { setBit(Pad.X, true) }, onRelease = { setBit(Pad.X, false) })
-            PadButton("B", Modifier.align(Alignment.CenterEnd), bs, bs, round = true, color = Color(0xFFE06B6B), onPress = { setBit(Pad.B, true) }, onRelease = { setBit(Pad.B, false) })
+            PadButton("Y", Modifier.align(Alignment.TopCenter), bs, bs, round = true, tint = Color(0xFFE0B341), onPress = { setBit(Pad.Y, true) }, onRelease = { setBit(Pad.Y, false) })
+            PadButton("A", Modifier.align(Alignment.BottomCenter), bs, bs, round = true, tint = Color(0xFF5FC47A), onPress = { setBit(Pad.A, true) }, onRelease = { setBit(Pad.A, false) })
+            PadButton("X", Modifier.align(Alignment.CenterStart), bs, bs, round = true, tint = Color(0xFF5B9BE6), onPress = { setBit(Pad.X, true) }, onRelease = { setBit(Pad.X, false) })
+            PadButton("B", Modifier.align(Alignment.CenterEnd), bs, bs, round = true, tint = Color(0xFFE06B6B), onPress = { setBit(Pad.B, true) }, onRelease = { setBit(Pad.B, false) })
         }
     }
 }
@@ -180,16 +200,19 @@ private fun PadButton(
     width: androidx.compose.ui.unit.Dp,
     height: androidx.compose.ui.unit.Dp,
     round: Boolean = false,
-    color: Color = Zl.card,
+    tint: Color? = null,
     onPress: () -> Unit,
     onRelease: () -> Unit,
 ) {
     var down by remember { mutableStateOf(false) }
+    val shape = if (round) CircleShape else RoundedCornerShape(14.dp)
+    val ring = tint ?: Zl.line
     Box(
         modifier
             .size(width, height)
-            .clip(if (round) CircleShape else RoundedCornerShape(12.dp))
-            .background(if (down) Zl.accent else color)
+            .clip(shape)
+            .background(if (down) (tint ?: Zl.accent) else Zl.card)
+            .border(if (tint != null) 1.5.dp else 1.dp, ring, shape)
             .pointerInput(Unit) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false).consume()
@@ -206,7 +229,7 @@ private fun PadButton(
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text(label, color = if (down) Zl.accentInk else Zl.text, fontSize = 13.sp)
+        Text(label, color = if (down) Zl.accentInk else (tint ?: Zl.muted), fontSize = if (round && width > 50.dp) 16.sp else 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
     }
 }
 
@@ -218,7 +241,8 @@ private fun Stick(modifier: Modifier, size: androidx.compose.ui.unit.Dp, onValue
         modifier
             .size(size)
             .clip(CircleShape)
-            .background(Zl.cardAlt)
+            .background(androidx.compose.ui.graphics.Brush.radialGradient(listOf(Zl.accentSoft, Zl.card)))
+            .border(1.5.dp, Zl.line, CircleShape)
             .pointerInput(Unit) {
                 val radius = this.size.width / 2f
                 awaitEachGesture {
@@ -248,15 +272,13 @@ private fun Stick(modifier: Modifier, size: androidx.compose.ui.unit.Dp, onValue
             },
         contentAlignment = Alignment.Center,
     ) {
-        Canvas(Modifier.fillMaxSize()) {
-            drawCircle(Color(0xFF232C3A), radius = this.size.width / 2f, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f))
-        }
         Box(
             Modifier
                 .offset { IntOffset(knob.x.roundToInt(), knob.y.roundToInt()) }
-                .size(size * 0.38f)
+                .size(size * 0.42f)
                 .clip(CircleShape)
-                .background(Zl.accent.copy(alpha = if (knob == Offset.Zero) 0.55f else 0.9f)),
+                .background(if (knob == Offset.Zero) Zl.card else Zl.accentSoft)
+                .border(1.5.dp, Zl.accent, CircleShape),
         )
     }
 }
@@ -269,8 +291,6 @@ private fun DPad(onValue: (Int, Int) -> Unit) {
     Box(
         Modifier
             .size(120.dp)
-            .clip(CircleShape)
-            .background(Zl.cardAlt)
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -298,21 +318,16 @@ private fun DPad(onValue: (Int, Int) -> Unit) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            "▲\n◀   ▶\n▼",
-            color = Zl.muted,
-            fontSize = 18.sp,
-            lineHeight = 26.sp,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-        Text(
-            when {
-                hx != 0 || hy != 0 -> "${if (hy < 0) "▲" else if (hy > 0) "▼" else ""}${if (hx < 0) "◀" else if (hx > 0) "▶" else ""}"
-                else -> ""
-            },
-            color = Zl.accent,
-            fontSize = 22.sp,
-            modifier = Modifier.align(Alignment.Center),
-        )
+        // four arrows, the one that is held lights up
+        @Composable
+        fun Arrow(icon: androidx.compose.ui.graphics.vector.ImageVector, on: Boolean, mod: Modifier) {
+            Box(mod.size(38.dp).clip(RoundedCornerShape(12.dp)).background(if (on) Zl.accent else Zl.card).border(1.dp, if (on) Zl.accent else Zl.line, RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+                Icon(icon, contentDescription = null, tint = if (on) Zl.accentInk else Zl.muted, modifier = Modifier.size(22.dp))
+            }
+        }
+        Arrow(Icons.Filled.KeyboardArrowUp, hy < 0, Modifier.align(Alignment.TopCenter))
+        Arrow(Icons.Filled.KeyboardArrowDown, hy > 0, Modifier.align(Alignment.BottomCenter))
+        Arrow(Icons.AutoMirrored.Filled.KeyboardArrowLeft, hx < 0, Modifier.align(Alignment.CenterStart))
+        Arrow(Icons.AutoMirrored.Filled.KeyboardArrowRight, hx > 0, Modifier.align(Alignment.CenterEnd))
     }
 }

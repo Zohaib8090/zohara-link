@@ -88,7 +88,7 @@ object Zl {
     }
 }
 
-enum class ZlScreen { WELCOME, FIND, PAIR, HOME, FILES, REMOTE, DESKTOP, GAMEPAD, STREAM, ZOAI, ACCESS }
+enum class ZlScreen { WELCOME, FIND, PAIR, HOME, FILES, REMOTE, DESKTOP, GAMEPAD, STREAM, KEYBOARD, ZOAI, ACCESS }
 
 @Composable
 fun ZlTheme(content: @Composable () -> Unit) {
