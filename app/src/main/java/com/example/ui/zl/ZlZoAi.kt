@@ -186,7 +186,7 @@ class ZoAiController(private val send: (JSONObject) -> Unit) {
                 problem = "The computer did not answer. On the computer: update Zohara Settings and Zohara Link (Settings > Zohara Update), open ZO-AI once, then switch on Settings > Zohara Link > this phone > Use ZO-AI."
             }
         }, 7000)
-        loadChats()
+        loadChats(); loadProfiles()
     }
 
     fun loadChats() {
@@ -815,7 +815,7 @@ private fun ChatPage(computerName: String, connected: Boolean, c: ZoAiController
             title = if (c.chatId == null) "ZoAI" else c.title,
             subtitle = when {
                 !connected -> "Not connected to $computerName"
-                c.ready && c.model.isNotEmpty() -> "${c.model}  ·  ${c.mode}  ·  $computerName"
+                c.ready && c.model.isNotEmpty() -> (c.profiles.firstOrNull { it.id == c.activeProfile }?.let { "${it.name}  ·  " } ?: "") + "${c.model}  ·  ${c.mode}"
                 c.ready -> computerName
                 else -> "Connecting to ZO-AI on $computerName…"
             },
@@ -995,38 +995,6 @@ private fun ModelTab(c: ZoAiController) {
     var renaming by remember { mutableStateOf<String?>(null) }
     var renameText by remember { mutableStateOf("") }
     Panel {
-        SectionTitle("Ask before acting", "Auto runs safe things and asks for the rest. Manual asks before every change. Skipping the questions (Bypass) can only be switched on at the computer.")
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 10.dp)) {
-            listOf("Auto", "Manual").forEach { m ->
-                val on = c.mode.equals(m, true)
-                Box(
-                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(if (on) Zl.accent else Zl.cardAlt).border(1.dp, if (on) Zl.accent else Zl.line, RoundedCornerShape(14.dp)).clickable { c.changeMode(m) }.padding(vertical = 13.dp),
-                    contentAlignment = Alignment.Center,
-                ) { Text(m, color = if (on) Zl.accentInk else Zl.text, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
-            }
-        }
-        if (c.mode.equals("Bypass", true)) Text("The computer is set to Bypass: ZO-AI does not ask before acting.", color = Zl.danger, fontSize = 12.5.sp, modifier = Modifier.padding(top = 8.dp))
-    }
-    Panel {
-        SectionTitle("Provider", "Who answers: the same choice as in ZO-AI on the computer.")
-        Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()).padding(top = 6.dp)) {
-            c.providers.forEach { p ->
-                val on = p.id == c.provider
-                Row(Modifier.fillMaxWidth().clickable { c.chooseProvider(p.id) }.padding(vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(p.name, color = if (on) Zl.accent else Zl.text, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, fontSize = 14.5.sp, modifier = Modifier.weight(1f))
-                    if (!p.hasKey) Text("no key", color = Zl.muted, fontSize = 12.sp)
-                    if (on) Icon(Icons.Filled.Check, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(18.dp).padding(start = 4.dp))
-                }
-            }
-        }
-    }
-    Panel {
-        SectionTitle("API key", "Saved on the computer (in its keyring) for ${c.provider.ifEmpty { "the provider" }}${if (c.activeProfile != null) " and the profile in use" else ""}. It is never kept on the phone.")
-        OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text("Paste the key") }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), shape = RoundedCornerShape(14.dp), colors = fieldColors(), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-        Spacer(Modifier.height(6.dp))
-        PrimaryButton("Save the key", enabled = key.isNotBlank()) { c.saveKey(key.trim()); key = "" }
-    }
-    Panel {
         SectionTitle("Profiles", "Saved presets of provider, model, effort and key. Choose one to switch to it.")
         c.profiles.forEach { p ->
             val on = p.id == c.activeProfile
@@ -1058,6 +1026,38 @@ private fun ModelTab(c: ZoAiController) {
         OutlinedTextField(value = newProfile, onValueChange = { newProfile = it }, label = { Text("New profile from the current choice") }, singleLine = true, shape = RoundedCornerShape(14.dp), colors = fieldColors(), modifier = Modifier.fillMaxWidth().padding(top = 12.dp))
         Spacer(Modifier.height(6.dp))
         PrimaryButton("Make the profile", enabled = newProfile.isNotBlank()) { c.createProfile(newProfile.trim()); newProfile = "" }
+    }
+    Panel {
+        SectionTitle("Ask before acting", "Auto runs safe things and asks for the rest. Manual asks before every change. Skipping the questions (Bypass) can only be switched on at the computer.")
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(top = 10.dp)) {
+            listOf("Auto", "Manual").forEach { m ->
+                val on = c.mode.equals(m, true)
+                Box(
+                    Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(if (on) Zl.accent else Zl.cardAlt).border(1.dp, if (on) Zl.accent else Zl.line, RoundedCornerShape(14.dp)).clickable { c.changeMode(m) }.padding(vertical = 13.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(m, color = if (on) Zl.accentInk else Zl.text, fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+            }
+        }
+        if (c.mode.equals("Bypass", true)) Text("The computer is set to Bypass: ZO-AI does not ask before acting.", color = Zl.danger, fontSize = 12.5.sp, modifier = Modifier.padding(top = 8.dp))
+    }
+    Panel {
+        SectionTitle("Provider", "Who answers: the same choice as in ZO-AI on the computer.")
+        Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()).padding(top = 6.dp)) {
+            c.providers.forEach { p ->
+                val on = p.id == c.provider
+                Row(Modifier.fillMaxWidth().clickable { c.chooseProvider(p.id) }.padding(vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(p.name, color = if (on) Zl.accent else Zl.text, fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, fontSize = 14.5.sp, modifier = Modifier.weight(1f))
+                    if (!p.hasKey) Text("no key", color = Zl.muted, fontSize = 12.sp)
+                    if (on) Icon(Icons.Filled.Check, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(18.dp).padding(start = 4.dp))
+                }
+            }
+        }
+    }
+    Panel {
+        SectionTitle("API key", "Saved on the computer (in its keyring) for ${c.provider.ifEmpty { "the provider" }}${if (c.activeProfile != null) " and the profile in use" else ""}. It is never kept on the phone.")
+        OutlinedTextField(value = key, onValueChange = { key = it }, label = { Text("Paste the key") }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), shape = RoundedCornerShape(14.dp), colors = fieldColors(), modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+        Spacer(Modifier.height(6.dp))
+        PrimaryButton("Save the key", enabled = key.isNotBlank()) { c.saveKey(key.trim()); key = "" }
     }
     Panel {
         SectionTitle("Model", if (c.provider.isEmpty()) "Choose a provider first." else "Provider: ${c.provider}")
