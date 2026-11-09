@@ -54,6 +54,8 @@ import kotlinx.coroutines.launch
 @Composable
 fun ZlApp(vm: EcosystemViewModel) {
     val context = LocalContext.current
+    // light or dark: the saved choice, else the phone's setting (read before anything draws)
+    remember { Zl.load(context) }
     val scope = rememberCoroutineScope()
     val conn by vm.connectionState.collectAsStateWithLifecycle()
     val paired by vm.pairedDevices.collectAsStateWithLifecycle()
@@ -282,6 +284,7 @@ fun ZlApp(vm: EcosystemViewModel) {
                         onClick = { vm.sendInputClick(it) },
                         onButton = { b, down -> vm.sendInputButton(b, down) },
                         onScrollSmooth = { dx, dy -> vm.sendInputScrollSmooth(dx, dy) },
+                        onKeyCode = { code, down -> vm.sendInputKeyCode(code, down) },
                         onBack = { screen = ZlScreen.REMOTE },
                     )
                 }

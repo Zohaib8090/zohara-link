@@ -22,13 +22,20 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -61,6 +68,16 @@ fun SasPairingDialog(
     onDismiss: () -> Unit
 ) {
     var pin by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(Unit) {
+        delay(200)
+        runCatching {
+            focusRequester.requestFocus()
+            keyboardController?.show()
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -123,14 +140,31 @@ fun SasPairingDialog(
                     onValueChange = { v -> pin = v.filter { it.isDigit() }.take(6) },
                     label = { Text("PIN from the computer") },
                     singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                    modifier = Modifier.fillMaxWidth().testTag("pairing_pin_field")
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.NumberPassword,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = {
+                            if (pin.length == 6) {
+                                keyboardController?.hide()
+                                onConfirm(pin)
+                            }
+                        }
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(focusRequester)
+                        .testTag("pairing_pin_field")
                 )
             }
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(pin) },
+                onClick = {
+                    keyboardController?.hide()
+                    onConfirm(pin)
+                },
                 enabled = pin.length == 6,
                 colors = ButtonDefaults.buttonColors(containerColor = BentoPrimaryBlue, contentColor = Color.White),
                 shape = RoundedCornerShape(12.dp),

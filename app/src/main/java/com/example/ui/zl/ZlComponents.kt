@@ -10,6 +10,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -30,6 +33,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,40 +46,67 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** The Zohara Link look: the dark navy and teal of the Zohara logo. Colours are the ones in the design canvas. */
+/**
+ * The Zohara Link look, in dark and light. Every colour reads the current mode, so a screen that uses `Zl.text` and friends
+ * changes with the phone's setting (or the person's choice in Access) without any change of its own.
+ */
 object Zl {
-    val bg = Color(0xFF0B0E14)
-    val card = Color(0xFF141A24)
-    val cardAlt = Color(0xFF101620)
-    val line = Color(0xFF232C3A)
-    val lineStrong = Color(0xFF2F3A4B)
-    val text = Color(0xFFE8ECF1)
-    val muted = Color(0xFF9AA6B5)
-    val accent = Color(0xFF5FD4D4)
-    val accentInk = Color(0xFF06181A)
-    val accentSoft = Color(0xFF16303A)
-    val ok = Color(0xFF7BE0A8)
-    val danger = Color(0xFFFFB4AB)
-    val dangerBg = Color(0xFF2A1719)
-    val bar = Color(0xFF0F141C)
+    /** "system" (follow the phone), "dark" or "light". */
+    var mode by mutableStateOf("system")
+    var systemDark by mutableStateOf(true)
+    val dark: Boolean get() = when (mode) { "dark" -> true; "light" -> false; else -> systemDark }
+
+    private fun pick(d: Long, l: Long) = Color(if (dark) d else l)
+
+    val bg get() = pick(0xFF07090D, 0xFFF6F4EE)
+    val card get() = pick(0xFF11161E, 0xFFFFFFFF)
+    val cardAlt get() = pick(0xFF0D1218, 0xFFF0EEE6)
+    val line get() = pick(0xFF202833, 0xFFE0DDD2)
+    val lineStrong get() = pick(0xFF2D3745, 0xFFCBC7BA)
+    val text get() = pick(0xFFEAF0F6, 0xFF1B1F24)
+    val muted get() = pick(0xFF8C99AA, 0xFF5E6A78)
+    val accent get() = pick(0xFF5FD4D4, 0xFF0B7F80)
+    val accentInk get() = pick(0xFF06181A, 0xFFFFFFFF)
+    val accentSoft get() = pick(0xFF12303A, 0xFFD9EDEC)
+    val ok get() = pick(0xFF7BE0A8, 0xFF17814F)
+    val danger get() = pick(0xFFFFB4AB, 0xFFB3261E)
+    val dangerBg get() = pick(0xFF2A1719, 0xFFFBE3E0)
+    val bar get() = pick(0xFF121821, 0xFFFFFFFF)
+
+    private const val FILE = "zohara_link_ui"
+
+    /** Reads the saved choice and what the phone is set to; called once when the app opens. */
+    fun load(context: android.content.Context) {
+        mode = context.getSharedPreferences(FILE, android.content.Context.MODE_PRIVATE).getString("theme", "system") ?: "system"
+        val night = context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK
+        systemDark = night != android.content.res.Configuration.UI_MODE_NIGHT_NO
+    }
+
+    fun choose(context: android.content.Context, m: String) {
+        mode = m
+        context.getSharedPreferences(FILE, android.content.Context.MODE_PRIVATE).edit().putString("theme", m).apply()
+    }
 }
 
 enum class ZlScreen { WELCOME, FIND, PAIR, HOME, FILES, REMOTE, DESKTOP, GAMEPAD, STREAM, ZOAI, ACCESS }
 
 @Composable
 fun ZlTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            primary = Zl.accent,
-            onPrimary = Zl.accentInk,
-            background = Zl.bg,
-            onBackground = Zl.text,
-            surface = Zl.card,
-            onSurface = Zl.text,
-            error = Zl.danger,
-        ),
-        content = content,
-    )
+    val system = androidx.compose.foundation.isSystemInDarkTheme()
+    androidx.compose.runtime.SideEffect { if (Zl.systemDark != system) Zl.systemDark = system }
+    val dark = when (Zl.mode) { "dark" -> true; "light" -> false; else -> system }
+    // the status bar icons follow the look: light icons on dark, dark icons on light
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect {
+        val window = (view.context as? android.app.Activity)?.window
+        if (window != null) androidx.core.view.WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !dark
+    }
+    val scheme = if (dark) {
+        darkColorScheme(primary = Zl.accent, onPrimary = Zl.accentInk, background = Zl.bg, onBackground = Zl.text, surface = Zl.card, onSurface = Zl.text, error = Zl.danger)
+    } else {
+        androidx.compose.material3.lightColorScheme(primary = Zl.accent, onPrimary = Zl.accentInk, background = Zl.bg, onBackground = Zl.text, surface = Zl.card, onSurface = Zl.text, error = Zl.danger)
+    }
+    MaterialTheme(colorScheme = scheme, content = content)
 }
 
 @Composable
@@ -187,21 +220,27 @@ private val navItems = listOf(
 
 @Composable
 fun ZlBottomBar(current: ZlScreen, onGo: (ZlScreen) -> Unit) {
-    NavigationBar(containerColor = Zl.bar) {
-        navItems.forEach { item ->
-            NavigationBarItem(
-                selected = item.screen == current,
-                onClick = { onGo(item.screen) },
-                icon = { Icon(item.icon, contentDescription = null) },
-                label = { Text(item.label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold) },
-                colors = NavigationBarItemDefaults.colors(
-                    selectedIconColor = Zl.accent,
-                    selectedTextColor = Zl.accent,
-                    indicatorColor = Zl.accentSoft,
-                    unselectedIconColor = Zl.muted,
-                    unselectedTextColor = Zl.muted,
-                ),
-            )
+    // a floating bar: rounded, with a hairline border, and a soft pill behind the current tab
+    val shape = RoundedCornerShape(26.dp)
+    Box(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 10.dp)) {
+        Row(
+            Modifier.fillMaxWidth().height(68.dp).clip(shape).background(Zl.bar).border(1.dp, Zl.line, shape),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            navItems.forEach { item ->
+                val on = item.screen == current
+                Column(
+                    Modifier.width(62.dp).clip(RoundedCornerShape(16.dp)).clickable(role = Role.Tab) { onGo(item.screen) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                ) {
+                    Box(Modifier.width(44.dp).height(28.dp).clip(RoundedCornerShape(14.dp)).background(if (on) Zl.accentSoft else Color.Transparent), contentAlignment = Alignment.Center) {
+                        Icon(item.icon, contentDescription = null, tint = if (on) Zl.accent else Zl.muted, modifier = Modifier.size(21.dp))
+                    }
+                    Text(item.label, color = if (on) Zl.accent else Zl.muted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+            }
         }
     }
 }

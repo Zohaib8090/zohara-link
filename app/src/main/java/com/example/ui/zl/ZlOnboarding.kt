@@ -16,22 +16,28 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.QrCode
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -49,18 +55,21 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.DiscoveredDevice
+import kotlinx.coroutines.delay
 
 /** The four-diamond Zohara mark, drawn so the app needs no image file. */
 @Composable
@@ -154,6 +163,16 @@ fun WelcomeScreen(onStart: () -> Unit) {
         }
         Spacer(Modifier.height(16.dp))
         PrimaryButton("Find my computer", onClick = onStart)
+        Spacer(Modifier.height(16.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Shield, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Secure • Fast • Simple", color = Zl.muted, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
     }
 }
 
@@ -171,6 +190,7 @@ fun FindScreen(
     onBack: () -> Unit,
 ) {
     var manualOpen by remember { mutableStateOf(false) }
+    var manualHost by remember { mutableStateOf("") }
 
     Column(
         Modifier
@@ -180,116 +200,216 @@ fun FindScreen(
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 24.dp, vertical = 8.dp),
     ) {
-        BackRow(onBack)
         Spacer(Modifier.height(12.dp))
-        Text("Find your computer", color = Zl.text, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(Modifier.height(10.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BackRow(onBack)
+            Text("Find Computer", color = Zl.text, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.width(48.dp))
+        }
+
+        Spacer(Modifier.height(24.dp))
         Text(
-            "Both devices need to be on the same Wi-Fi. Zohara computers appear here by themselves.",
+            "Your Zohara computer appears here automatically.",
+            color = Zl.text, fontSize = 20.sp, fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(12.dp))
+        Text(
+            "Both devices need to be on the same Wi-Fi.",
             color = Zl.muted, fontSize = 15.sp, lineHeight = 22.sp,
         )
 
         Spacer(Modifier.height(28.dp))
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (scanning || connecting) {
-                CircularProgressIndicator(color = Zl.accent, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-            }
+        Row(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Zl.accentSoft)
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Computer, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(20.dp))
             Text(
-                if (connecting) "CONNECTING" else if (scanning) "LOOKING NEARBY" else if (devices.isEmpty()) "NOTHING FOUND" else "FOUND",
-                color = Zl.accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.8.sp,
+                "Computers are discoverable while Zohara Link is on in Settings > Zohara Link on your computer.",
+                color = Zl.text, fontSize = 14.sp, lineHeight = 20.sp,
+                modifier = Modifier.weight(1f),
             )
         }
-        Spacer(Modifier.height(14.dp))
 
-        if (devices.isEmpty() && !scanning) {
+        Spacer(Modifier.height(28.dp))
+        Row(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Zl.card)
+                .border(1.dp, Zl.line, RoundedCornerShape(20.dp))
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Shield, contentDescription = null, tint = Zl.ok, modifier = Modifier.size(20.dp))
             Text(
-                "Make sure the computer is on this same Wi-Fi and Zohara Link is turned on in its Settings. Some Wi-Fi networks block automatic discovery: then scan the Wi-Fi below or type the address (shown in Settings > Zohara Link on the computer).",
-                color = Zl.muted, fontSize = 14.sp, lineHeight = 21.sp,
+                "Pairing is off until you press Pair a phone, so nobody else on the Wi-Fi can ask.",
+                color = Zl.text, fontSize = 14.sp, lineHeight = 20.sp,
+                modifier = Modifier.weight(1f),
             )
         }
-        devices.forEach { d ->
-            val shape = RoundedCornerShape(20.dp)
-            Row(
-                Modifier
-                    .padding(bottom = 12.dp)
-                    .fillMaxWidth()
-                    .clip(shape)
-                    .background(Zl.card)
-                    .border(1.dp, Zl.line, shape)
-                    .clickable(enabled = !connecting, role = Role.Button) { onPick(d) }
-                    .padding(16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                IconTile(Icons.Filled.Computer, tile = 48, background = Zl.bg)
-                Column(Modifier.weight(1f)) {
-                    Text(d.serviceName, color = Zl.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
-                    Text("Zohara OS · same Wi-Fi", color = Zl.muted, fontSize = 13.sp)
-                }
-                Box(
-                    Modifier
-                        .heightIn(min = 40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Zl.accent)
-                        .padding(horizontal = 16.dp),
-                    contentAlignment = Alignment.Center,
-                ) { Text("Pair", color = Zl.accentInk, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+
+        Spacer(Modifier.height(28.dp))
+        Row(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Zl.cardAlt)
+                .border(1.dp, Zl.line, RoundedCornerShape(20.dp))
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Warning, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(20.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    "If nothing appears:",
+                    color = Zl.text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "1. Turn on Zohara Link in Settings > Zohara Link on the computer.\n2. Press 'Pair a phone'.\n3. Return here and it should show up automatically.",
+                    color = Zl.muted, fontSize = 13.sp, lineHeight = 19.sp,
+                )
             }
         }
 
         if (error != null) {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(16.dp))
             Text(error, color = Zl.danger, fontSize = 14.sp, lineHeight = 20.sp)
         }
 
         Spacer(Modifier.height(24.dp))
-        val shape = RoundedCornerShape(20.dp)
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(shape)
-                .background(Zl.cardAlt)
-                .border(1.dp, Zl.line, shape)
-                .padding(18.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Text("Not on the list?", color = Zl.text, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+
+        if (devices.isEmpty() && !scanning) {
+            Column(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Zl.card)
+                    .border(1.dp, Zl.line, RoundedCornerShape(20.dp))
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Icon(Icons.Filled.QrCode, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(32.dp))
+                Text(
+                    "Scan a QR code",
+                    color = Zl.text, fontSize = 17.sp, fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "If you can't find the computer, use the QR code from the computer's Settings > Zohara Link > Pair a phone.",
+                    color = Zl.muted, fontSize = 14.sp, lineHeight = 20.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                SecondaryButton("Scan QR code") { onScan() }
+            }
+        }
+
+        if (devices.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
             Text(
-                "1. On the computer open Settings > Zohara Link.\n" +
-                    "2. Press Pair a phone. Pairing is off until you do, so nobody else on the Wi-Fi can ask.\n" +
-                    "3. Come back here: the computer shows up by itself.",
-                color = Zl.muted, fontSize = 14.sp, lineHeight = 22.sp,
+                "Available computers:",
+                color = Zl.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(12.dp))
+            devices.forEach { d ->
+                val shape = RoundedCornerShape(20.dp)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                        .clip(shape)
+                        .background(Zl.card)
+                        .border(1.dp, Zl.line, shape)
+                        .clickable(enabled = !connecting, role = Role.Button) { onPick(d) }
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    IconTile(Icons.Filled.Computer, tile = 48, background = Zl.bg)
+                    Column(Modifier.weight(1f)) {
+                        Text(d.serviceName, color = Zl.text, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Box(Modifier.size(6.dp).clip(RoundedCornerShape(3.dp)).background(Zl.ok))
+                            Text("Zohara OS", color = Zl.ok, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    Box(
+                        Modifier
+                            .heightIn(min = 40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Zl.accent)
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Text("Connect", color = Zl.accentInk, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                }
+            }
+        }
+
+        if (scanning || connecting) {
+            Spacer(Modifier.height(24.dp))
+            Row(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Zl.accentSoft)
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CircularProgressIndicator(color = Zl.accent, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                Text(
+                    if (connecting) "Connecting..." else "Scanning for computers...",
+                    color = Zl.accent, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                )
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        SecondaryButton("Enter computer address manually") { manualOpen = true }
+        if (manualOpen) {
+            AlertDialog(
+                onDismissRequest = { manualOpen = false },
+                containerColor = Zl.card,
+                title = { Text("Computer's address", color = Zl.text) },
+                text = {
+                    OutlinedTextField(
+                        value = manualHost,
+                        onValueChange = { manualHost = it },
+                        singleLine = true,
+                        label = { Text("For example 192.168.1.20") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    )
+                },
+                confirmButton = {
+                    TextButton(enabled = manualHost.isNotBlank(), onClick = {
+                        manualOpen = false
+                        onManual(manualHost.trim())
+                    }) {
+                        Text("Connect", color = Zl.accent)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { manualOpen = false }) { Text("Cancel", color = Zl.muted) }
+                },
             )
         }
-        Spacer(Modifier.height(20.dp))
-        SecondaryButton("Scan my Wi-Fi for computers") { onScan() }
-        Spacer(Modifier.height(10.dp))
-        SecondaryButton("Type the computer's address instead") { manualOpen = true }
-        Spacer(Modifier.height(24.dp))
-    }
 
-    if (manualOpen) {
-        var host by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { manualOpen = false },
-            containerColor = Zl.card,
-            title = { Text("Computer's address", color = Zl.text) },
-            text = {
-                OutlinedTextField(
-                    value = host,
-                    onValueChange = { host = it },
-                    singleLine = true,
-                    label = { Text("For example 192.168.1.20") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                )
-            },
-            confirmButton = {
-                TextButton(enabled = host.isNotBlank(), onClick = { manualOpen = false; onManual(host.trim()) }) {
-                    Text("Connect", color = Zl.accent)
-                }
-            },
-            dismissButton = { TextButton(onClick = { manualOpen = false }) { Text("Cancel", color = Zl.muted) } },
-        )
+        Spacer(Modifier.height(16.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Shield, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
+            Text("Secure connection", color = Zl.muted, fontSize = 12.sp)
+        }
     }
 }
 
@@ -305,7 +425,16 @@ fun PairScreen(
 ) {
     var pin by remember { mutableStateOf("") }
     val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val interactionSource = remember { MutableInteractionSource() }
+
+    LaunchedEffect(Unit) {
+        delay(200)
+        runCatching {
+            focus.requestFocus()
+            keyboardController?.show()
+        }
+    }
 
     Column(
         Modifier
@@ -319,94 +448,134 @@ fun PairScreen(
         Spacer(Modifier.height(12.dp))
         Text(
             "Pair with $computerName",
-            color = Zl.text, fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold,
+            color = Zl.text, fontSize = 28.sp, lineHeight = 32.sp, fontWeight = FontWeight.Bold,
         )
 
-        Spacer(Modifier.height(28.dp))
-        StepTitle("1", "Check the code")
-        Spacer(Modifier.height(10.dp))
-        ZlCard(Modifier.padding(0.dp)) {
-            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    fingerprint,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center,
-                    color = Zl.accent, fontSize = 24.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Medium,
-                    letterSpacing = 1.sp,
-                )
-                Text(
-                    "It must be the same as \"This computer's code\" in Settings > Zohara Link on the computer.",
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center,
-                    color = Zl.muted, fontSize = 13.sp, lineHeight = 19.sp,
-                )
-            }
+        Spacer(Modifier.height(32.dp))
+        Row(
+            Modifier.fillMaxWidth()
+                .clip(RoundedCornerShape(16.dp))
+                .background(Zl.accentSoft)
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.Filled.Shield, contentDescription = null, tint = Zl.accent, modifier = Modifier.size(20.dp))
+            Text(
+                "PIN code verification",
+                color = Zl.text, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+            )
         }
 
         Spacer(Modifier.height(28.dp))
-        StepTitle("2", "Type the PIN from the computer")
-        Spacer(Modifier.height(12.dp))
+        Text(
+            "Enter the 6-digit PIN shown on your computer:",
+            color = Zl.muted, fontSize = 15.sp, lineHeight = 22.sp,
+        )
+
+        Spacer(Modifier.height(20.dp))
         BasicTextField(
             value = pin,
-            onValueChange = { v -> if (v.length <= 6 && v.all { it.isDigit() }) pin = v },
-            modifier = Modifier.focusRequester(focus),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-            singleLine = true,
-            cursorBrush = SolidColor(Color.Transparent),
-            textStyle = androidx.compose.ui.text.TextStyle(color = Color.Transparent),
-            decorationBox = {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    repeat(6) { i ->
-                        val active = i == pin.length
-                        val shape = RoundedCornerShape(14.dp)
-                        Box(
-                            Modifier
-                                .weight(1f)
-                                .height(60.dp)
-                                .clip(shape)
-                                .background(Zl.card)
-                                .border(1.5.dp, if (active) Zl.accent else Zl.lineStrong, shape),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                pin.getOrNull(i)?.toString() ?: "",
-                                color = Zl.text, fontSize = 26.sp, fontFamily = FontFamily.Monospace,
-                            )
+            onValueChange = { v ->
+                val digits = v.filter { it.isDigit() }.take(6)
+                pin = digits
+            },
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.NumberPassword,
+                imeAction = ImeAction.Done,
+            ),
+            keyboardActions = KeyboardActions(
+                onDone = {
+                    if (pin.length == 6) {
+                        keyboardController?.hide()
+                        onConfirm(pin)
+                    }
+                }
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focus)
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                ) {
+                    focus.requestFocus()
+                    keyboardController?.show()
+                },
+            decorationBox = { innerTextField ->
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(Modifier.size(0.dp)) {
+                        innerTextField()
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        repeat(6) { i ->
+                            val active = i == pin.length
+                            val shape = RoundedCornerShape(14.dp)
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .height(60.dp)
+                                    .clip(shape)
+                                    .background(Zl.card)
+                                    .border(1.5.dp, if (active) Zl.accent else Zl.lineStrong, shape),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    pin.getOrNull(i)?.toString() ?: "",
+                                    color = Zl.text, fontSize = 24.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold,
+                                )
+                            }
                         }
                     }
                 }
-            },
+            }
         )
-        Spacer(Modifier.height(12.dp))
+
+        Spacer(Modifier.height(24.dp))
         Text(
             "The PIN is only shown on the computer. It stops working after 3 wrong tries or 2 minutes.",
             color = Zl.muted, fontSize = 13.sp, lineHeight = 19.sp,
         )
 
+        if (fingerprint.isNotBlank()) {
+            Spacer(Modifier.height(14.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Zl.accentSoft)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Verification code (SAS)", color = Zl.muted, fontSize = 13.sp)
+                Text(fingerprint, color = Zl.accent, fontSize = 13.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+            }
+        }
+
         if (error != null) {
             Spacer(Modifier.height(16.dp))
-            Text(error, color = Zl.danger, fontSize = 14.sp, lineHeight = 20.sp)
+            Row(
+                Modifier.fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Zl.dangerBg)
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.Top,
+            ) {
+                Icon(Icons.Filled.Warning, contentDescription = null, tint = Zl.danger, modifier = Modifier.size(16.dp))
+                Text(error, color = Zl.danger, fontSize = 14.sp, lineHeight = 20.sp)
+            }
         }
 
-        Spacer(Modifier.height(24.dp))
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Zl.dangerBg)
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.Top,
-        ) {
-            Icon(Icons.Filled.Warning, contentDescription = null, tint = Zl.danger, modifier = Modifier.size(18.dp))
-            Text(
-                "Codes different? Stop and cancel. Someone else on this Wi-Fi may be in the middle.",
-                color = Zl.danger, fontSize = 13.sp, lineHeight = 19.sp,
-            )
+        Spacer(Modifier.height(32.dp))
+        PrimaryButton("Pair this phone", enabled = pin.length == 6) {
+            keyboardController?.hide()
+            onConfirm(pin)
         }
-
-        Spacer(Modifier.height(28.dp))
-        PrimaryButton("Pair this phone", enabled = pin.length == 6) { onConfirm(pin) }
         Spacer(Modifier.height(8.dp))
         TextButton(onClick = onCancel, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
             Text("Cancel", color = Zl.muted, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)

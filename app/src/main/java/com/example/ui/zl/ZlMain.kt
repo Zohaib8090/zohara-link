@@ -60,13 +60,13 @@ import androidx.compose.ui.unit.sp
 import com.example.model.MediaControlState
 import com.example.model.TransferRecordEntity
 
-private val Page = Modifier
+private val Page: Modifier get() = Modifier
     .fillMaxSize()
     .background(Zl.bg)
 
 @Composable
 private fun Title(text: String) {
-    Text(text, color = Zl.text, fontSize = 30.sp, fontWeight = FontWeight.ExtraBold)
+    Text(text, color = Zl.text, fontSize = 38.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif, fontWeight = FontWeight.Normal)
 }
 
 private fun ago(ts: Long): String =
@@ -132,7 +132,7 @@ fun HomeScreen(
             Modifier
                 .fillMaxWidth()
                 .clip(shape)
-                .background(Brush.linearGradient(listOf(Color16303A, Zl.card)))
+                .background(Brush.linearGradient(listOf(Zl.accentSoft, Zl.card)))
                 .border(1.dp, Zl.accentSoft, shape)
                 .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
@@ -140,7 +140,7 @@ fun HomeScreen(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 IconTile(Icons.Filled.Computer, tile = 52, background = Zl.bg)
                 Column(Modifier.weight(1f)) {
-                    Text(computerName, color = Zl.text, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(computerName, color = Zl.text, fontSize = 26.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Serif, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Box(Modifier.size(8.dp).clip(CircleShape).background(if (connected) Zl.ok else Zl.muted))
                         Text(
@@ -208,7 +208,6 @@ fun HomeScreen(
     }
 }
 
-private val Color16303A = androidx.compose.ui.graphics.Color(0xFF16303A)
 
 // 5 ---------------------------------------------------------------------------------------------------------------
 
@@ -236,7 +235,7 @@ fun FilesScreen(
                 .height(148.dp)
                 .clip(shape)
                 .background(Zl.cardAlt)
-                .border(1.5.dp, androidx.compose.ui.graphics.Color(0xFF3A4A5E), shape)
+                .border(1.5.dp, Zl.lineStrong, shape)
                 .clickable(role = Role.Button, onClick = onChoose),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -450,6 +449,24 @@ fun AccessScreen(
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         Title("Access")
+
+        val context = androidx.compose.ui.platform.LocalContext.current
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("Appearance")
+            ZlCard {
+                Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("system" to "Follow phone", "dark" to "Dark", "light" to "Light").forEach { (m, label) ->
+                        val on = Zl.mode == m
+                        Box(
+                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(if (on) Zl.accent else Zl.cardAlt)
+                                .border(1.dp, if (on) Zl.accent else Zl.line, RoundedCornerShape(12.dp))
+                                .clickable(role = Role.RadioButton) { Zl.choose(context, m) }.padding(vertical = 12.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { Text(label, color = if (on) Zl.accentInk else Zl.text, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold) }
+                    }
+                }
+            }
+        }
 
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionLabel("This phone shares")
