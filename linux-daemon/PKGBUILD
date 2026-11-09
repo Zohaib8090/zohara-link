@@ -25,6 +25,7 @@ optdepends=(
 )
 options=(!lto)
 backup=()
+install=zohara-linkd.install
 source=()
 sha256sums=()
 
