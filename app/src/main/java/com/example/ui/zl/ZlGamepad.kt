@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -142,9 +143,9 @@ fun GamepadControls(
         buttons = if (on) buttons or bit else buttons and bit.inv()
     }
 
-    Box(modifier.fillMaxSize()) {
+    Box(modifier.fillMaxSize().statusBarsPadding()) {
         // top left: close, and which computer the controller is on
-        Row(Modifier.align(Alignment.TopStart).padding(start = 24.dp, top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.align(Alignment.TopStart).padding(start = 24.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(40.dp).clip(CircleShape).background(Zl.card).border(1.dp, Zl.line, CircleShape).clickable { onClose() },
                 contentAlignment = Alignment.Center,
@@ -162,10 +163,10 @@ fun GamepadControls(
         }
 
         // triggers and bumpers, under the top row
-        PadButton("LT", Modifier.align(Alignment.TopStart).padding(start = 30.dp, top = 70.dp), 118.dp, 44.dp, onPress = { lt = 1f }, onRelease = { lt = 0f })
-        PadButton("LB", Modifier.align(Alignment.TopStart).padding(start = 158.dp, top = 70.dp), 70.dp, 44.dp, onPress = { setBit(Pad.LB, true) }, onRelease = { setBit(Pad.LB, false) })
-        PadButton("RT", Modifier.align(Alignment.TopEnd).padding(end = 30.dp, top = 70.dp), 118.dp, 44.dp, onPress = { rt = 1f }, onRelease = { rt = 0f })
-        PadButton("RB", Modifier.align(Alignment.TopEnd).padding(end = 158.dp, top = 70.dp), 70.dp, 44.dp, onPress = { setBit(Pad.RB, true) }, onRelease = { setBit(Pad.RB, false) })
+        PadButton("LT", Modifier.align(Alignment.TopStart).padding(start = 30.dp, top = 58.dp), 118.dp, 44.dp, onPress = { lt = 1f }, onRelease = { lt = 0f })
+        PadButton("LB", Modifier.align(Alignment.TopStart).padding(start = 158.dp, top = 58.dp), 70.dp, 44.dp, onPress = { setBit(Pad.LB, true) }, onRelease = { setBit(Pad.LB, false) })
+        PadButton("RT", Modifier.align(Alignment.TopEnd).padding(end = 30.dp, top = 58.dp), 118.dp, 44.dp, onPress = { rt = 1f }, onRelease = { rt = 0f })
+        PadButton("RB", Modifier.align(Alignment.TopEnd).padding(end = 158.dp, top = 58.dp), 70.dp, 44.dp, onPress = { setBit(Pad.RB, true) }, onRelease = { setBit(Pad.RB, false) })
 
         // middle: Back, Guide, Start
         Row(Modifier.align(Alignment.Center).padding(top = 40.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp)) {
@@ -175,15 +176,15 @@ fun GamepadControls(
         }
 
         // left stick (bottom left) and direction pad above it
-        Stick(Modifier.align(Alignment.BottomStart).padding(start = 36.dp, bottom = 24.dp), 150.dp) { x, y -> lx = x; ly = y }
-        Box(Modifier.align(Alignment.CenterStart).padding(start = 40.dp, bottom = 40.dp)) {
+        Stick(Modifier.align(Alignment.BottomStart).padding(start = 40.dp, bottom = 12.dp), 112.dp) { x, y -> lx = x; ly = y }
+        Box(Modifier.align(Alignment.TopStart).padding(start = 44.dp, top = 106.dp)) {
             DPad { x, y -> hatX = x; hatY = y }
         }
 
         // right stick (bottom, towards the middle) and the four face buttons on the right
-        Stick(Modifier.align(Alignment.BottomEnd).padding(end = 190.dp, bottom = 24.dp), 130.dp) { x, y -> rx = x; ry = y }
-        Box(Modifier.align(Alignment.CenterEnd).padding(end = 30.dp, bottom = 40.dp).size(150.dp)) {
-            val bs = 52.dp
+        Stick(Modifier.align(Alignment.BottomEnd).padding(end = 190.dp, bottom = 12.dp), 104.dp) { x, y -> rx = x; ry = y }
+        Box(Modifier.align(Alignment.TopEnd).padding(end = 36.dp, top = 106.dp).size(132.dp)) {
+            val bs = 46.dp
             PadButton("Y", Modifier.align(Alignment.TopCenter), bs, bs, round = true, tint = Color(0xFFE0B341), onPress = { setBit(Pad.Y, true) }, onRelease = { setBit(Pad.Y, false) })
             PadButton("A", Modifier.align(Alignment.BottomCenter), bs, bs, round = true, tint = Color(0xFF5FC47A), onPress = { setBit(Pad.A, true) }, onRelease = { setBit(Pad.A, false) })
             PadButton("X", Modifier.align(Alignment.CenterStart), bs, bs, round = true, tint = Color(0xFF5B9BE6), onPress = { setBit(Pad.X, true) }, onRelease = { setBit(Pad.X, false) })
