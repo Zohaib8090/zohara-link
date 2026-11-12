@@ -12,7 +12,7 @@ const OPS: &[&str] = &[
     "status", "chats", "chat", "delete_chat", "pin_chat", "mode", "providers", "models", "select", "mcp_list", "mcp_add",
     "mcp_import", "mcp_remove", "mcp_toggle", "send", "switch", "set_key", "profiles", "profile_use", "profile_create",
     "profile_rename", "profile_delete", "profile_pin", "memory", "memory_add", "memory_forget", "memory_pin", "memory_enable", "memory_clear", "personalities", "personality_use", "personality_add", "personality_generate", "personality_remove", "scheduled", "schedule_cancel", "schedule_add", "projects", "project_create",
-    "compact",
+    "compact", "memory_update", "memory_edit", "search", "artifacts", "machines", "machine_test", "sync_status",
 ];
 
 /// Where ZO-AI listens: `$XDG_RUNTIME_DIR/zo-ai/agent.sock`, like the program itself.
